@@ -25,6 +25,8 @@ enum AuditAction {
   CREATE
   EDIT
   CHAPTERS_EDIT
+  TRACKS_EDIT
+  REORDER
   PUBLISH
   SCHEDULE
   CANCEL_SCHEDULE
@@ -49,6 +51,14 @@ enum PodcastStatus {
   ARCHIVED
 }
 
+enum ReleaseStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  UNPUBLISHED
+  ARCHIVED
+}
+
 model User {
   id               String                   @id @default(uuid()) @db.Uuid
   name             String
@@ -66,6 +76,8 @@ model User {
   trackAuditLogs   TrackAuditLog[]
   podcastRevisions PodcastEpisodeRevision[]
   podcastAuditLogs PodcastAuditLog[]
+  releaseRevisions ReleaseRevision[]
+  releaseAuditLogs ReleaseAuditLog[]
 
   @@map("users")
 }
@@ -145,6 +157,10 @@ model Artist {
   secondaryPodcasts         PodcastEpisode[]         @relation("PodcastSecondaryArtist")
   primaryPodcastRevisions   PodcastEpisodeRevision[] @relation("PodcastRevisionPrimaryArtist")
   secondaryPodcastRevisions PodcastEpisodeRevision[] @relation("PodcastRevisionSecondaryArtist")
+  primaryReleases           Release[]                @relation("ReleasePrimaryArtist")
+  secondaryReleases         Release[]                @relation("ReleaseSecondaryArtist")
+  primaryReleaseRevisions   ReleaseRevision[]        @relation("ReleaseRevisionPrimaryArtist")
+  secondaryReleaseRevisions ReleaseRevision[]        @relation("ReleaseRevisionSecondaryArtist")
 
   @@index([status])
   @@index([scheduledFor])
@@ -200,6 +216,8 @@ model Label {
   revisions        TrackRevision[]
   podcasts         PodcastEpisode[]
   podcastRevisions PodcastEpisodeRevision[]
+  releases         Release[]
+  releaseRevisions ReleaseRevision[]
 
   @@map("labels")
 }
@@ -233,6 +251,7 @@ model Track {
   publishedRevision   TrackRevision?  @relation("PublishedTrackRevision", fields: [id, publishedRevisionId], references: [trackId, id], onDelete: Restrict)
   scheduledRevision   TrackRevision?  @relation("ScheduledTrackRevision", fields: [id, scheduledRevisionId], references: [trackId, id], onDelete: Restrict)
   auditLogs           TrackAuditLog[]
+  releaseTracks       ReleaseTrack[]
 
   @@index([primaryArtistId])
   @@index([secondaryArtistId])
@@ -243,18 +262,18 @@ model Track {
 }
 
 model TrackRevision {
-  id                      String   @id @default(uuid()) @db.Uuid
-  trackId                 String   @db.Uuid
+  id                      String                 @id @default(uuid()) @db.Uuid
+  trackId                 String                 @db.Uuid
   revisionNumber          Int
   sourceWorkingVersion    Int
   title                   String
-  primaryArtistId         String   @db.Uuid
+  primaryArtistId         String                 @db.Uuid
   primaryArtistLegacyId   Int
   primaryArtistName       String
-  secondaryArtistId       String?  @db.Uuid
+  secondaryArtistId       String?                @db.Uuid
   secondaryArtistLegacyId Int?
   secondaryArtistName     String?
-  labelId                 String   @db.Uuid
+  labelId                 String                 @db.Uuid
   labelName               String
   labelLegacyValue        String
   durationMs              Int?
@@ -264,15 +283,16 @@ model TrackRevision {
   bandcampUrl             String?
   appleMusicUrl           String?
   soundcloudUrl           String?
-  createdById             String   @db.Uuid
-  createdAt               DateTime @default(now()) @db.Timestamptz(6)
-  track                   Track    @relation("TrackRevisions", fields: [trackId], references: [id], onDelete: Restrict)
-  primaryArtist           Artist   @relation("TrackRevisionPrimaryArtist", fields: [primaryArtistId], references: [id], onDelete: Restrict)
-  secondaryArtist         Artist?  @relation("TrackRevisionSecondaryArtist", fields: [secondaryArtistId], references: [id], onDelete: Restrict)
-  label                   Label    @relation(fields: [labelId], references: [id], onDelete: Restrict)
-  createdBy               User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  publishedByTracks       Track[]  @relation("PublishedTrackRevision")
-  scheduledForTracks      Track[]  @relation("ScheduledTrackRevision")
+  createdById             String                 @db.Uuid
+  createdAt               DateTime               @default(now()) @db.Timestamptz(6)
+  track                   Track                  @relation("TrackRevisions", fields: [trackId], references: [id], onDelete: Restrict)
+  primaryArtist           Artist                 @relation("TrackRevisionPrimaryArtist", fields: [primaryArtistId], references: [id], onDelete: Restrict)
+  secondaryArtist         Artist?                @relation("TrackRevisionSecondaryArtist", fields: [secondaryArtistId], references: [id], onDelete: Restrict)
+  label                   Label                  @relation(fields: [labelId], references: [id], onDelete: Restrict)
+  createdBy               User                   @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  publishedByTracks       Track[]                @relation("PublishedTrackRevision")
+  scheduledForTracks      Track[]                @relation("ScheduledTrackRevision")
+  releaseRevisionTracks   ReleaseRevisionTrack[]
 
   @@unique([trackId, revisionNumber])
   @@unique([trackId, id])
@@ -416,4 +436,131 @@ model PodcastAuditLog {
   @@index([episodeId, createdAt])
   @@index([actorId])
   @@map("podcast_audit_logs")
+}
+
+model Release {
+  id                  String            @id @default(uuid()) @db.Uuid
+  legacyId            Int               @unique @default(autoincrement())
+  title               String
+  primaryArtistId     String            @db.Uuid
+  secondaryArtistId   String?           @db.Uuid
+  releaseDate         DateTime?         @db.Date
+  labelId             String            @db.Uuid
+  spotifyUrl          String?
+  beatportUrl         String?
+  traxsourceUrl       String?
+  bandcampUrl         String?
+  appleMusicUrl       String?
+  soundcloudUrl       String?
+  status              ReleaseStatus     @default(DRAFT)
+  workingVersion      Int               @default(1)
+  publishedRevisionId String?           @db.Uuid
+  scheduledRevisionId String?           @db.Uuid
+  scheduledFor        DateTime?         @db.Timestamptz(6)
+  archivedAt          DateTime?         @db.Timestamptz(6)
+  createdAt           DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime          @updatedAt @db.Timestamptz(6)
+  primaryArtist       Artist            @relation("ReleasePrimaryArtist", fields: [primaryArtistId], references: [id], onDelete: Restrict)
+  secondaryArtist     Artist?           @relation("ReleaseSecondaryArtist", fields: [secondaryArtistId], references: [id], onDelete: Restrict)
+  label               Label             @relation(fields: [labelId], references: [id], onDelete: Restrict)
+  tracks              ReleaseTrack[]
+  revisions           ReleaseRevision[] @relation("ReleaseRevisions")
+  publishedRevision   ReleaseRevision?  @relation("PublishedReleaseRevision", fields: [id, publishedRevisionId], references: [releaseId, id], onDelete: Restrict)
+  scheduledRevision   ReleaseRevision?  @relation("ScheduledReleaseRevision", fields: [id, scheduledRevisionId], references: [releaseId, id], onDelete: Restrict)
+  auditLogs           ReleaseAuditLog[]
+
+  @@index([primaryArtistId])
+  @@index([secondaryArtistId])
+  @@index([labelId])
+  @@index([releaseDate])
+  @@index([status])
+  @@index([scheduledFor])
+  @@map("releases")
+}
+
+model ReleaseTrack {
+  id        String   @id @default(uuid()) @db.Uuid
+  releaseId String   @db.Uuid
+  trackId   String   @db.Uuid
+  position  Int
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  release   Release  @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+  track     Track    @relation(fields: [trackId], references: [id], onDelete: Restrict)
+
+  @@unique([releaseId, trackId])
+  @@unique([releaseId, position])
+  @@index([trackId])
+  @@map("release_tracks")
+}
+
+model ReleaseRevision {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  releaseId               String                 @db.Uuid
+  revisionNumber          Int
+  sourceWorkingVersion    Int
+  title                   String
+  primaryArtistId         String                 @db.Uuid
+  primaryArtistLegacyId   Int
+  primaryArtistName       String
+  secondaryArtistId       String?                @db.Uuid
+  secondaryArtistLegacyId Int?
+  secondaryArtistName     String?
+  labelId                 String                 @db.Uuid
+  labelName               String
+  labelLegacyValue        String
+  releaseDate             DateTime               @db.Date
+  spotifyUrl              String?
+  beatportUrl             String?
+  traxsourceUrl           String?
+  bandcampUrl             String?
+  appleMusicUrl           String?
+  soundcloudUrl           String?
+  createdById             String                 @db.Uuid
+  createdAt               DateTime               @default(now()) @db.Timestamptz(6)
+  release                 Release                @relation("ReleaseRevisions", fields: [releaseId], references: [id], onDelete: Restrict)
+  primaryArtist           Artist                 @relation("ReleaseRevisionPrimaryArtist", fields: [primaryArtistId], references: [id], onDelete: Restrict)
+  secondaryArtist         Artist?                @relation("ReleaseRevisionSecondaryArtist", fields: [secondaryArtistId], references: [id], onDelete: Restrict)
+  label                   Label                  @relation(fields: [labelId], references: [id], onDelete: Restrict)
+  createdBy               User                   @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  tracks                  ReleaseRevisionTrack[]
+  publishedByReleases     Release[]              @relation("PublishedReleaseRevision")
+  scheduledForReleases    Release[]              @relation("ScheduledReleaseRevision")
+
+  @@unique([releaseId, revisionNumber])
+  @@unique([releaseId, id])
+  @@index([primaryArtistId])
+  @@index([secondaryArtistId])
+  @@index([labelId])
+  @@index([createdById])
+  @@map("release_revisions")
+}
+
+model ReleaseRevisionTrack {
+  id                String          @id @default(uuid()) @db.Uuid
+  releaseRevisionId String          @db.Uuid
+  trackRevisionId   String          @db.Uuid
+  position          Int
+  releaseRevision   ReleaseRevision @relation(fields: [releaseRevisionId], references: [id], onDelete: Restrict)
+  trackRevision     TrackRevision   @relation(fields: [trackRevisionId], references: [id], onDelete: Restrict)
+
+  @@unique([releaseRevisionId, trackRevisionId])
+  @@unique([releaseRevisionId, position])
+  @@index([trackRevisionId])
+  @@map("release_revision_tracks")
+}
+
+model ReleaseAuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  releaseId String      @db.Uuid
+  actorId   String?     @db.Uuid
+  action    AuditAction
+  metadata  Json?
+  createdAt DateTime    @default(now()) @db.Timestamptz(6)
+  release   Release     @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+  actor     User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([releaseId, createdAt])
+  @@index([actorId])
+  @@map("release_audit_logs")
 }

@@ -105,6 +105,7 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
 .filter-bar { display: grid; grid-template-columns: 2fr repeat(3, 1fr) auto; gap: 10px; padding: 16px; margin-bottom: 18px; }
 .track-table .table-row { grid-template-columns: 1.4fr 1fr .9fr .55fr .65fr .8fr .8fr .9fr; font-size: .78rem; }
 .podcast-table .table-row { grid-template-columns: 1.4fr 1fr .7fr .85fr .55fr .55fr .8fr .8fr .9fr; font-size: .75rem; }
+.release-table .table-row { grid-template-columns: 1.35fr 1fr .8fr .8fr .45fr .55fr .75fr .85fr .85fr; font-size: .74rem; }
 .section-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin: 42px 0 18px; }
 .section-heading .eyebrow { margin-bottom: 6px; }
 .section-heading p { margin: 0; }
@@ -114,6 +115,16 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
 .drag-handle { align-self: center; border: 0; background: transparent; cursor: grab; font-size: 1.1rem; }
 .chapter-actions { grid-column: 3 / -1; display: flex; gap: 7px; justify-content: flex-end; }
 .chapter-actions button { padding: 6px 10px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+.track-picker { display: grid; grid-template-columns: 1fr 1.5fr auto; gap: 10px; align-items: end; margin-bottom: 18px; }
+.track-picker label { margin: 0; }
+.release-track-list { display: grid; gap: 10px; margin-bottom: 26px; }
+.release-track-row { display: grid; grid-template-columns: 32px 32px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 14px 12px; border: 1px solid var(--line); background: #f8f5ee; }
+.release-track-row > span { display: grid; gap: 3px; }
+.release-track-row small { color: var(--muted); font-size: .7rem; }
+.release-track-actions { display: flex; gap: 7px; }
+.release-track-actions button { padding: 6px 9px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+.blocking-warning, .track-change-warning { color: var(--danger); font-size: .7rem; font-style: normal; font-weight: 700; }
+.track-change-warning { color: #705000; }
 
 @media (max-width: 900px) {
   .editor-grid { grid-template-columns: 1fr; }
@@ -122,6 +133,9 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
   .track-table .table-row { min-width: 1050px; }
   .podcast-table { overflow-x: auto; }
   .podcast-table .table-row { min-width: 1150px; }
+  .release-table { overflow-x: auto; }
+  .release-table .table-row { min-width: 1200px; }
+  .track-picker { grid-template-columns: 1fr; }
   .chapter-row { grid-template-columns: 34px 28px 1fr 1fr; }
   .chapter-row label:nth-of-type(3), .chapter-row label:nth-of-type(4) { grid-column: span 2; }
   .table-row { grid-template-columns: 1.6fr .6fr .8fr; }
