@@ -1,10 +1,11 @@
 import { handleLegacyArtistRequest } from "@/modules/artists/legacy";
 import { handleLegacyTrackRequest } from "@/modules/tracks/legacy";
+import { handleLegacyPodcastRequest } from "@/modules/podcasts/legacy";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  return new URL(request.url).searchParams.get("filter") === "tracks"
-    ? handleLegacyTrackRequest(request)
-    : handleLegacyArtistRequest(request);
+  const params = new URL(request.url).searchParams;
+  if (params.get("filter") === "tracks" && params.get("type") === "podcast") return handleLegacyPodcastRequest(request);
+  return params.get("filter") === "tracks" ? handleLegacyTrackRequest(request) : handleLegacyArtistRequest(request);
 }

@@ -24,6 +24,7 @@ enum ArtistStatus {
 enum AuditAction {
   CREATE
   EDIT
+  CHAPTERS_EDIT
   PUBLISH
   SCHEDULE
   CANCEL_SCHEDULE
@@ -40,21 +41,31 @@ enum TrackStatus {
   ARCHIVED
 }
 
+enum PodcastStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  UNPUBLISHED
+  ARCHIVED
+}
+
 model User {
-  id             String           @id @default(uuid()) @db.Uuid
-  name           String
-  email          String           @unique
-  emailVerified  Boolean          @default(false)
-  image          String?
-  role           Role             @default(VIEWER)
-  createdAt      DateTime         @default(now()) @db.Timestamptz(6)
-  updatedAt      DateTime         @updatedAt @db.Timestamptz(6)
-  sessions       Session[]
-  accounts       Account[]
-  revisions      ArtistRevision[]
-  auditLogs      AuditLog[]
-  trackRevisions TrackRevision[]
-  trackAuditLogs TrackAuditLog[]
+  id               String                   @id @default(uuid()) @db.Uuid
+  name             String
+  email            String                   @unique
+  emailVerified    Boolean                  @default(false)
+  image            String?
+  role             Role                     @default(VIEWER)
+  createdAt        DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime                 @updatedAt @db.Timestamptz(6)
+  sessions         Session[]
+  accounts         Account[]
+  revisions        ArtistRevision[]
+  auditLogs        AuditLog[]
+  trackRevisions   TrackRevision[]
+  trackAuditLogs   TrackAuditLog[]
+  podcastRevisions PodcastEpisodeRevision[]
+  podcastAuditLogs PodcastAuditLog[]
 
   @@map("users")
 }
@@ -108,28 +119,32 @@ model Verification {
 }
 
 model Artist {
-  id                      String           @id @default(uuid()) @db.Uuid
-  legacyId                Int              @unique @default(autoincrement())
-  name                    String
-  slug                    String           @unique
-  shortBio                String?
-  facebookUrl             String?
-  status                  ArtistStatus     @default(DRAFT)
-  workingVersion          Int              @default(1)
-  publishedRevisionId     String?          @db.Uuid
-  scheduledRevisionId     String?          @db.Uuid
-  scheduledFor            DateTime?        @db.Timestamptz(6)
-  archivedAt              DateTime?        @db.Timestamptz(6)
-  createdAt               DateTime         @default(now()) @db.Timestamptz(6)
-  updatedAt               DateTime         @updatedAt @db.Timestamptz(6)
-  revisions               ArtistRevision[] @relation("ArtistRevisions")
-  publishedRevision       ArtistRevision?  @relation("PublishedRevision", fields: [id, publishedRevisionId], references: [artistId, id], onDelete: Restrict)
-  scheduledRevision       ArtistRevision?  @relation("ScheduledRevision", fields: [id, scheduledRevisionId], references: [artistId, id], onDelete: Restrict)
-  auditLogs               AuditLog[]
-  primaryTracks           Track[]          @relation("TrackPrimaryArtist")
-  secondaryTracks         Track[]          @relation("TrackSecondaryArtist")
-  primaryTrackRevisions   TrackRevision[]  @relation("TrackRevisionPrimaryArtist")
-  secondaryTrackRevisions TrackRevision[]  @relation("TrackRevisionSecondaryArtist")
+  id                        String                   @id @default(uuid()) @db.Uuid
+  legacyId                  Int                      @unique @default(autoincrement())
+  name                      String
+  slug                      String                   @unique
+  shortBio                  String?
+  facebookUrl               String?
+  status                    ArtistStatus             @default(DRAFT)
+  workingVersion            Int                      @default(1)
+  publishedRevisionId       String?                  @db.Uuid
+  scheduledRevisionId       String?                  @db.Uuid
+  scheduledFor              DateTime?                @db.Timestamptz(6)
+  archivedAt                DateTime?                @db.Timestamptz(6)
+  createdAt                 DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt                 DateTime                 @updatedAt @db.Timestamptz(6)
+  revisions                 ArtistRevision[]         @relation("ArtistRevisions")
+  publishedRevision         ArtistRevision?          @relation("PublishedRevision", fields: [id, publishedRevisionId], references: [artistId, id], onDelete: Restrict)
+  scheduledRevision         ArtistRevision?          @relation("ScheduledRevision", fields: [id, scheduledRevisionId], references: [artistId, id], onDelete: Restrict)
+  auditLogs                 AuditLog[]
+  primaryTracks             Track[]                  @relation("TrackPrimaryArtist")
+  secondaryTracks           Track[]                  @relation("TrackSecondaryArtist")
+  primaryTrackRevisions     TrackRevision[]          @relation("TrackRevisionPrimaryArtist")
+  secondaryTrackRevisions   TrackRevision[]          @relation("TrackRevisionSecondaryArtist")
+  primaryPodcasts           PodcastEpisode[]         @relation("PodcastPrimaryArtist")
+  secondaryPodcasts         PodcastEpisode[]         @relation("PodcastSecondaryArtist")
+  primaryPodcastRevisions   PodcastEpisodeRevision[] @relation("PodcastRevisionPrimaryArtist")
+  secondaryPodcastRevisions PodcastEpisodeRevision[] @relation("PodcastRevisionSecondaryArtist")
 
   @@index([status])
   @@index([scheduledFor])
@@ -174,15 +189,17 @@ model AuditLog {
 }
 
 model Label {
-  id          String          @id @default(uuid()) @db.Uuid
-  name        String
-  slug        String          @unique
-  legacyValue String          @unique
-  active      Boolean         @default(true)
-  createdAt   DateTime        @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime        @updatedAt @db.Timestamptz(6)
-  tracks      Track[]
-  revisions   TrackRevision[]
+  id               String                   @id @default(uuid()) @db.Uuid
+  name             String
+  slug             String                   @unique
+  legacyValue      String                   @unique
+  active           Boolean                  @default(true)
+  createdAt        DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime                 @updatedAt @db.Timestamptz(6)
+  tracks           Track[]
+  revisions        TrackRevision[]
+  podcasts         PodcastEpisode[]
+  podcastRevisions PodcastEpisodeRevision[]
 
   @@map("labels")
 }
@@ -279,4 +296,124 @@ model TrackAuditLog {
   @@index([trackId, createdAt])
   @@index([actorId])
   @@map("track_audit_logs")
+}
+
+model PodcastEpisode {
+  id                  String                   @id @default(uuid()) @db.Uuid
+  legacyId            Int                      @unique @default(autoincrement())
+  title               String
+  primaryArtistId     String                   @db.Uuid
+  secondaryArtistId   String?                  @db.Uuid
+  labelId             String                   @db.Uuid
+  episodeDate         DateTime?                @db.Date
+  durationMs          Int?
+  status              PodcastStatus            @default(DRAFT)
+  workingVersion      Int                      @default(1)
+  publishedRevisionId String?                  @db.Uuid
+  scheduledRevisionId String?                  @db.Uuid
+  scheduledFor        DateTime?                @db.Timestamptz(6)
+  archivedAt          DateTime?                @db.Timestamptz(6)
+  createdAt           DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime                 @updatedAt @db.Timestamptz(6)
+  primaryArtist       Artist                   @relation("PodcastPrimaryArtist", fields: [primaryArtistId], references: [id], onDelete: Restrict)
+  secondaryArtist     Artist?                  @relation("PodcastSecondaryArtist", fields: [secondaryArtistId], references: [id], onDelete: Restrict)
+  label               Label                    @relation(fields: [labelId], references: [id], onDelete: Restrict)
+  chapters            PodcastChapter[]
+  revisions           PodcastEpisodeRevision[] @relation("PodcastRevisions")
+  publishedRevision   PodcastEpisodeRevision?  @relation("PublishedPodcastRevision", fields: [id, publishedRevisionId], references: [episodeId, id], onDelete: Restrict)
+  scheduledRevision   PodcastEpisodeRevision?  @relation("ScheduledPodcastRevision", fields: [id, scheduledRevisionId], references: [episodeId, id], onDelete: Restrict)
+  auditLogs           PodcastAuditLog[]
+
+  @@index([primaryArtistId])
+  @@index([secondaryArtistId])
+  @@index([labelId])
+  @@index([episodeDate])
+  @@index([status])
+  @@index([scheduledFor])
+  @@map("podcast_episodes")
+}
+
+model PodcastChapter {
+  id              String         @id @default(uuid()) @db.Uuid
+  episodeId       String         @db.Uuid
+  position        Int
+  artist          String
+  title           String
+  legacyReference String?
+  durationMs      Int?
+  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(6)
+  episode         PodcastEpisode @relation(fields: [episodeId], references: [id], onDelete: Restrict)
+
+  @@unique([episodeId, position])
+  @@index([episodeId])
+  @@map("podcast_chapters")
+}
+
+model PodcastEpisodeRevision {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  episodeId               String                   @db.Uuid
+  revisionNumber          Int
+  sourceWorkingVersion    Int
+  title                   String
+  primaryArtistId         String                   @db.Uuid
+  primaryArtistLegacyId   Int
+  primaryArtistName       String
+  secondaryArtistId       String?                  @db.Uuid
+  secondaryArtistLegacyId Int?
+  secondaryArtistName     String?
+  labelId                 String                   @db.Uuid
+  labelName               String
+  labelLegacyValue        String
+  episodeDate             DateTime                 @db.Date
+  durationMs              Int?
+  createdById             String                   @db.Uuid
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
+  episode                 PodcastEpisode           @relation("PodcastRevisions", fields: [episodeId], references: [id], onDelete: Restrict)
+  primaryArtist           Artist                   @relation("PodcastRevisionPrimaryArtist", fields: [primaryArtistId], references: [id], onDelete: Restrict)
+  secondaryArtist         Artist?                  @relation("PodcastRevisionSecondaryArtist", fields: [secondaryArtistId], references: [id], onDelete: Restrict)
+  label                   Label                    @relation(fields: [labelId], references: [id], onDelete: Restrict)
+  createdBy               User                     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  chapters                PodcastChapterRevision[]
+  publishedByEpisodes     PodcastEpisode[]         @relation("PublishedPodcastRevision")
+  scheduledForEpisodes    PodcastEpisode[]         @relation("ScheduledPodcastRevision")
+
+  @@unique([episodeId, revisionNumber])
+  @@unique([episodeId, id])
+  @@index([primaryArtistId])
+  @@index([secondaryArtistId])
+  @@index([labelId])
+  @@index([createdById])
+  @@map("podcast_episode_revisions")
+}
+
+model PodcastChapterRevision {
+  id                String                 @id @default(uuid()) @db.Uuid
+  episodeRevisionId String                 @db.Uuid
+  sourceChapterId   String?                @db.Uuid
+  position          Int
+  artist            String
+  title             String
+  legacyReference   String?
+  durationMs        Int?
+  episodeRevision   PodcastEpisodeRevision @relation(fields: [episodeRevisionId], references: [id], onDelete: Restrict)
+
+  @@unique([episodeRevisionId, position])
+  @@index([episodeRevisionId])
+  @@map("podcast_chapter_revisions")
+}
+
+model PodcastAuditLog {
+  id        String         @id @default(uuid()) @db.Uuid
+  episodeId String         @db.Uuid
+  actorId   String?        @db.Uuid
+  action    AuditAction
+  metadata  Json?
+  createdAt DateTime       @default(now()) @db.Timestamptz(6)
+  episode   PodcastEpisode @relation(fields: [episodeId], references: [id], onDelete: Restrict)
+  actor     User?          @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([episodeId, createdAt])
+  @@index([actorId])
+  @@map("podcast_audit_logs")
 }

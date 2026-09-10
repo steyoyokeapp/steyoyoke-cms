@@ -12,7 +12,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["src/lib/authorization.ts", "src/modules/artists/**/*.ts", "src/modules/tracks/**/*.ts"],
+      include: ["src/lib/authorization.ts", "src/modules/artists/**/*.ts", "src/modules/tracks/**/*.ts", "src/modules/podcasts/**/*.ts"],
     },
   },
 });

@@ -1,0 +1,15 @@
+import Link from "next/link";
+import { headers } from "next/headers";
+import { PodcastEditor, type PodcastEditorData } from "@/components/podcast-editor";
+import { actorForPage } from "@/lib/session";
+import { serializeLegacyPodcast } from "@/modules/podcasts/legacy";
+import { getPodcast, getPodcastFormOptions } from "@/modules/podcasts/service";
+
+export default async function PodcastPage({ params }: PageProps<"/admin/podcasts/[id]">) {
+  const actor = await actorForPage(await headers()); const podcast = await getPodcast(actor, (await params).id); const options = await getPodcastFormOptions(actor, podcast);
+  const revisionData = (revision: NonNullable<typeof podcast.publishedRevision>) => ({ id: revision.id, revisionNumber: revision.revisionNumber, sourceWorkingVersion: revision.sourceWorkingVersion, title: revision.title, primaryArtistName: revision.primaryArtistName, labelName: revision.labelName, chapterCount: revision.chapters.length, createdAt: revision.createdAt.toISOString() });
+  const data: PodcastEditorData = { id: podcast.id, legacyId: podcast.legacyId, title: podcast.title, primaryArtistId: podcast.primaryArtistId, secondaryArtistId: podcast.secondaryArtistId, labelId: podcast.labelId, episodeDate: podcast.episodeDate?.toISOString().slice(0,10) ?? "", durationMs: podcast.durationMs, status: podcast.status, workingVersion: podcast.workingVersion, scheduledFor: podcast.scheduledFor?.toISOString() ?? null,
+    chapters: podcast.chapters.map(({ id, artist, title, legacyReference, durationMs }) => ({ id, artist, title, legacyReference, durationMs })), publishedRevision: podcast.publishedRevision ? revisionData(podcast.publishedRevision) : null, scheduledRevision: podcast.scheduledRevision ? revisionData(podcast.scheduledRevision) : null, revisions: podcast.revisions.map(revisionData), auditLogs: podcast.auditLogs.map((log) => ({ id: log.id, action: log.action, createdAt: log.createdAt.toISOString(), actor: log.actor ? { name: log.actor.name } : null })) };
+  const legacyPreview = podcast.publishedRevision && (podcast.status === "PUBLISHED" || podcast.status === "SCHEDULED") ? { tracks: [serializeLegacyPodcast(podcast.publishedRevision, podcast.legacyId)], base_cover_folder: "/1440/", main_cover_folder: "/assets/uploads/files" } : null;
+  return <><Link className="back-link" href="/admin/podcasts">← Podcasts</Link><section className="page-heading"><div><div className="eyebrow">Podcast record</div><h1>{podcast.title}</h1><p className="muted">Working episode and immutable chapter snapshots.</p></div></section><PodcastEditor podcast={data} role={actor.role} artists={options.artists.map(({ id, name, legacyId }) => ({ id, name, legacyId }))} labels={options.labels.map(({ id, name, active }) => ({ id, name, active }))} legacyPreview={legacyPreview} /></>;
+}

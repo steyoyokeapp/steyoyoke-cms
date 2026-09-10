@@ -1,5 +1,6 @@
 import { handleLegacyArtistRequest } from "@/modules/artists/legacy";
 import { handleLegacyTrackRequest } from "@/modules/tracks/legacy";
+import { handleLegacyPodcastRequest } from "@/modules/podcasts/legacy";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ legacyId: string }> };
@@ -10,7 +11,7 @@ export async function GET(request: Request, context: Context) {
   if (!/^\d+$/.test(legacyId) || !Number.isSafeInteger(numericId)) {
     return Response.json({ error: "Invalid legacy id." }, { status: 400 });
   }
-  return new URL(request.url).searchParams.get("filter") === "tracks"
-    ? handleLegacyTrackRequest(request, numericId)
-    : handleLegacyArtistRequest(request, numericId);
+  const params = new URL(request.url).searchParams;
+  if (params.get("filter") === "tracks" && params.get("type") === "podcast") return handleLegacyPodcastRequest(request, numericId);
+  return params.get("filter") === "tracks" ? handleLegacyTrackRequest(request, numericId) : handleLegacyArtistRequest(request, numericId);
 }
