@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum ArtistStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  UNPUBLISHED
+  ARCHIVED
+}
+
+enum AuditAction {
+  CREATE
+  EDIT
+  PUBLISH
+  SCHEDULE
+  CANCEL_SCHEDULE
+  UNPUBLISH
+  ARCHIVE
+  RESTORE
+}
+
+model User {
+  id            String           @id @default(uuid()) @db.Uuid
+  name          String
+  email         String           @unique
+  emailVerified Boolean          @default(false)
+  image         String?
+  role          Role             @default(VIEWER)
+  createdAt     DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @db.Timestamptz(6)
+  sessions      Session[]
+  accounts      Account[]
+  revisions     ArtistRevision[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  expiresAt DateTime @db.Timestamptz(6)
+  token     String   @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  ipAddress String?
+  userAgent String?
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id @default(uuid()) @db.Uuid
+  accountId             String
+  providerId            String
+  userId                String    @db.Uuid
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(6)
+  refreshTokenExpiresAt DateTime? @db.Timestamptz(6)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(6)
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(uuid()) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+model Artist {
+  id                  String           @id @default(uuid()) @db.Uuid
+  legacyId            Int              @unique @default(autoincrement())
+  name                String
+  slug                String           @unique
+  shortBio            String?
+  facebookUrl         String?
+  status              ArtistStatus     @default(DRAFT)
+  workingVersion      Int              @default(1)
+  publishedRevisionId String?          @db.Uuid
+  scheduledRevisionId String?          @db.Uuid
+  scheduledFor        DateTime?        @db.Timestamptz(6)
+  archivedAt          DateTime?        @db.Timestamptz(6)
+  createdAt           DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime         @updatedAt @db.Timestamptz(6)
+  revisions           ArtistRevision[] @relation("ArtistRevisions")
+  publishedRevision   ArtistRevision?  @relation("PublishedRevision", fields: [id, publishedRevisionId], references: [artistId, id], onDelete: Restrict)
+  scheduledRevision   ArtistRevision?  @relation("ScheduledRevision", fields: [id, scheduledRevisionId], references: [artistId, id], onDelete: Restrict)
+  auditLogs           AuditLog[]
+
+  @@index([status])
+  @@index([scheduledFor])
+  @@map("artists")
+}
+
+model ArtistRevision {
+  id                   String    @id @default(uuid()) @db.Uuid
+  artistId             String    @db.Uuid
+  revisionNumber       Int
+  sourceWorkingVersion Int
+  name                 String
+  slug                 String
+  shortBio             String?
+  facebookUrl          String?
+  createdById          String    @db.Uuid
+  createdAt            DateTime  @default(now()) @db.Timestamptz(6)
+  artist               Artist    @relation("ArtistRevisions", fields: [artistId], references: [id], onDelete: Restrict)
+  createdBy            User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  publishedByArtists   Artist[]  @relation("PublishedRevision")
+  scheduledForArtists  Artist[]  @relation("ScheduledRevision")
+
+  @@unique([artistId, revisionNumber])
+  @@unique([artistId, id])
+  @@index([createdById])
+  @@map("artist_revisions")
+}
+
+model AuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  artistId  String      @db.Uuid
+  actorId   String?     @db.Uuid
+  action    AuditAction
+  metadata  Json?
+  createdAt DateTime    @default(now()) @db.Timestamptz(6)
+  artist    Artist      @relation(fields: [artistId], references: [id], onDelete: Restrict)
+  actor     User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, createdAt])
+  @@index([actorId])
+  @@map("audit_logs")
+}
