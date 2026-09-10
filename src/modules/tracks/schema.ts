@@ -16,6 +16,7 @@ export const trackDraftSchema = z.object({
   appleMusicUrl: httpsUrl,
   soundcloudUrl: httpsUrl,
   artworkAssetId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
+  audioAssetId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
 }).superRefine((value, context) => {
   if (value.secondaryArtistId && value.primaryArtistId === value.secondaryArtistId) {
     context.addIssue({ code: "custom", path: ["secondaryArtistId"], message: "Secondary Artist must differ from Primary Artist." });

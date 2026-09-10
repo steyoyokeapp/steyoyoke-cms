@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 export const publishedReleaseWhere: Prisma.ReleaseWhereInput = { publishedRevisionId: { not: null }, status: { in: [ReleaseStatus.PUBLISHED, ReleaseStatus.SCHEDULED] } };
 
 export const publishedReleaseInclude = {
-  publishedRevision: { include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } } },
+  publishedRevision: { include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, audioAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } } },
 } satisfies Prisma.ReleaseInclude;
 
 export async function listPublishedReleasesForLegacy(limit?: number, offset = 0) {

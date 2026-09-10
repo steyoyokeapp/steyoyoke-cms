@@ -7,17 +7,18 @@ import { archivePodcast, cancelPodcastSchedule, createPodcast, getPodcast, getPu
 import { createTrack, publishTrack } from "@/modules/tracks/service";
 import { handleLegacyTrackRequest } from "@/modules/tracks/legacy";
 
-let editor: Actor; let viewer: Actor; let labelId: string; let artworkAssetId: string;
+let editor: Actor; let viewer: Actor; let labelId: string; let artworkAssetId: string; let audioAssetId: string;
 beforeEach(async () => {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "media_audit_logs", "media_variants", "media_assets", "podcast_audit_logs", "podcast_chapter_revisions", "podcast_episode_revisions", "podcast_chapters", "podcast_episodes", "track_audit_logs", "track_revisions", "tracks", "audit_logs", "artist_revisions", "artists", "accounts", "sessions", "verifications", "users", "labels" RESTART IDENTITY CASCADE');
   const [editorUser, viewerUser] = await Promise.all([prisma.user.create({ data: { name: "Editor", email: "podcast-editor@test.local", role: "EDITOR", emailVerified: true } }), prisma.user.create({ data: { name: "Viewer", email: "podcast-viewer@test.local", role: "VIEWER", emailVerified: true } })]);
   editor = { userId: editorUser.id, role: "EDITOR" }; viewer = { userId: viewerUser.id, role: "VIEWER" };
   artworkAssetId = (await prisma.mediaAsset.create({ data: { kind: "IMAGE", status: "READY", provider: "LOCAL", sourceStorageKey: `tests/${crypto.randomUUID()}.jpg`, compatibilityFilename: `${crypto.randomUUID()}.jpg`, originalFilename: "test.jpg", mimeType: "image/jpeg", byteSize: 3, sha256Checksum: "a".repeat(64), width: 1, height: 1, createdById: editor.userId } })).id;
+  audioAssetId = (await prisma.mediaAsset.create({ data: { kind: "AUDIO", status: "READY", provider: "LOCAL", sourceStorageKey: `tests/${crypto.randomUUID()}.mp3`, legacyAudioId: crypto.randomUUID(), originalFilename: "test.mp3", mimeType: "audio/mpeg", byteSize: 3, sha256Checksum: "b".repeat(64), durationMs: 1000, createdById: editor.userId } })).id;
   labelId = (await prisma.label.create({ data: { name: "Steyoyoke Black", slug: "steyoyoke-black", legacyValue: "STEYOYOKE_BLACK" } })).id;
 });
 afterAll(async () => prisma.$disconnect());
 async function artist(name = "Podcast Artist", publish = true) { const value = await createArtist(editor, { name }); if (publish) await publishArtist(editor, value.id, { expectedWorkingVersion: 1 }); return value; }
-async function podcast(primaryArtistId: string, title = "Steyoyoke Episode") { return createPodcast(editor, { title, primaryArtistId, labelId, episodeDate: "2026-08-09", durationMs: 3600000, artworkAssetId }); }
+async function podcast(primaryArtistId: string, title = "Steyoyoke Episode") { return createPodcast(editor, { title, primaryArtistId, labelId, episodeDate: "2026-08-09", durationMs: 3600000, artworkAssetId, audioAssetId }); }
 const chapterInput = [{ artist: "Artist One", title: "First", legacyReference: "REF-1", durationMs: 225000 }, { artist: "Artist Two", title: "Second", legacyReference: null, durationMs: null }];
 const request = (type: "track" | "podcast", legacyId?: number, query = "") => new Request(`http://local/index.php/cms/api${legacyId === undefined ? "" : `/${legacyId}`}?filter=tracks&type=${type}${query}`, { headers: { "X-Csrf-Token": process.env.LEGACY_API_KEY_A! } });
 

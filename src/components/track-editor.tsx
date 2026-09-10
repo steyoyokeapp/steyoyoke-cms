@@ -4,28 +4,30 @@ import { useMemo, useState, type FormEvent } from "react";
 import { formatDuration, parseDuration } from "@/modules/tracks/duration";
 import type { TrackOption } from "@/components/track-create-form";
 import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
+import { AudioPicker, type AudioOption } from "@/components/audio-picker";
 
 type Revision = { id: string; revisionNumber: number; sourceWorkingVersion: number; title: string; primaryArtistName: string; labelName: string; createdAt: string };
 type Audit = { id: string; action: string; createdAt: string; actor: { name: string } | null };
 export type TrackEditorData = {
   id: string; legacyId: number; title: string; primaryArtistId: string; secondaryArtistId: string | null; labelId: string;
   durationMs: number | null; spotifyUrl: string | null; beatportUrl: string | null; traxsourceUrl: string | null;
-  bandcampUrl: string | null; appleMusicUrl: string | null; soundcloudUrl: string | null; artworkAssetId: string | null; status: string; workingVersion: number;
+  bandcampUrl: string | null; appleMusicUrl: string | null; soundcloudUrl: string | null; artworkAssetId: string | null; audioAssetId: string | null; status: string; workingVersion: number;
   scheduledFor: string | null; publishedRevision: Revision | null; scheduledRevision: Revision | null; revisions: Revision[]; auditLogs: Audit[];
 };
 
 async function result(response: Response) { const body = await response.json(); if (!response.ok) throw new Error(body.error?.message ?? "The operation failed."); return body; }
 const displayDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
 
-export function TrackEditor({ track, role, artists, labels, mediaAssets, legacyPreview }: { track: TrackEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; mediaAssets: ArtworkOption[]; legacyPreview: unknown }) {
+export function TrackEditor({ track, role, artists, labels, mediaAssets, audioAssets, legacyPreview }: { track: TrackEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; mediaAssets: ArtworkOption[]; audioAssets: AudioOption[]; legacyPreview: unknown }) {
   const canWrite = role !== "VIEWER"; const [pending, setPending] = useState(false); const [error, setError] = useState(""); const [artistQuery, setArtistQuery] = useState("");
   const [title, setTitle] = useState(track.title); const [primaryArtistId, setPrimaryArtistId] = useState(track.primaryArtistId); const [secondaryArtistId, setSecondaryArtistId] = useState(track.secondaryArtistId ?? ""); const [labelId, setLabelId] = useState(track.labelId); const [duration, setDuration] = useState(formatDuration(track.durationMs) ?? ""); const [scheduledFor, setScheduledFor] = useState("");
   const [links, setLinks] = useState({ spotifyUrl: track.spotifyUrl ?? "", beatportUrl: track.beatportUrl ?? "", traxsourceUrl: track.traxsourceUrl ?? "", bandcampUrl: track.bandcampUrl ?? "", appleMusicUrl: track.appleMusicUrl ?? "", soundcloudUrl: track.soundcloudUrl ?? "" });
   const [artworkAssetId, setArtworkAssetId] = useState<string | null>(track.artworkAssetId);
+  const [audioAssetId, setAudioAssetId] = useState<string | null>(track.audioAssetId);
   const shownArtists = useMemo(() => artists.filter((artist) => artist.name.toLowerCase().includes(artistQuery.toLowerCase()) || artist.id === primaryArtistId || artist.id === secondaryArtistId), [artists, artistQuery, primaryArtistId, secondaryArtistId]);
   const primary = artists.find(({ id }) => id === primaryArtistId); const secondary = artists.find(({ id }) => id === secondaryArtistId); const label = labels.find(({ id }) => id === labelId);
   const unpublishedChanges = !track.publishedRevision || track.publishedRevision.sourceWorkingVersion !== track.workingVersion;
-  const selectedArtwork = mediaAssets.find(({ id }) => id === artworkAssetId); const canonicalPreview = { id: track.id, legacyId: track.legacyId, title, artists: { primary: primary ? { id: primary.id, name: primary.name } : null, secondary: secondary ? { id: secondary.id, name: secondary.name } : null }, label: label ? { id: label.id, name: label.name } : null, durationMs: (() => { try { return parseDuration(duration); } catch { return "invalid"; } })(), artwork: selectedArtwork ? { mediaAssetId: selectedArtwork.id, status: selectedArtwork.status, dimensions: `${selectedArtwork.width}×${selectedArtwork.height}`, preview: `/assets/uploads/files/${selectedArtwork.compatibilityFilename}` } : null, links: Object.fromEntries(Object.entries(links).map(([key, value]) => [key, value || null])), workflow: { status: track.status, scheduledFor: track.scheduledFor }, workingVersion: track.workingVersion };
+  const selectedArtwork = mediaAssets.find(({ id }) => id === artworkAssetId); const selectedAudio = audioAssets.find(({ id }) => id === audioAssetId); const canonicalPreview = { id: track.id, legacyId: track.legacyId, title, artists: { primary: primary ? { id: primary.id, name: primary.name } : null, secondary: secondary ? { id: secondary.id, name: secondary.name } : null }, label: label ? { id: label.id, name: label.name } : null, durationMs: (() => { try { return parseDuration(duration); } catch { return "invalid"; } })(), artwork: selectedArtwork ? { mediaAssetId: selectedArtwork.id, status: selectedArtwork.status, dimensions: `${selectedArtwork.width}×${selectedArtwork.height}`, preview: `/assets/uploads/files/${selectedArtwork.compatibilityFilename}` } : null, audio: selectedAudio ? { mediaAssetId: selectedAudio.id, filename: selectedAudio.originalFilename, durationMs: selectedAudio.durationMs, status: selectedAudio.status, playbackUrl: `/legacy-audio/${selectedAudio.legacyAudioId}-high.mp3` } : null, links: Object.fromEntries(Object.entries(links).map(([key, value]) => [key, value || null])), workflow: { status: track.status, scheduledFor: track.scheduledFor }, workingVersion: track.workingVersion };
 
   async function perform(action: string, extra: Record<string, unknown> = {}) {
     setPending(true); setError("");
@@ -35,7 +37,7 @@ export function TrackEditor({ track, role, artists, labels, mediaAssets, legacyP
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setError("");
     try {
-      await result(await fetch(`/api/admin/tracks/${track.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, primaryArtistId, secondaryArtistId, labelId, durationMs: parseDuration(duration), artworkAssetId, ...links, expectedWorkingVersion: track.workingVersion }) })); window.location.reload();
+      await result(await fetch(`/api/admin/tracks/${track.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, primaryArtistId, secondaryArtistId, labelId, durationMs: parseDuration(duration), artworkAssetId, audioAssetId, ...links, expectedWorkingVersion: track.workingVersion }) })); window.location.reload();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save draft."); setPending(false); }
   }
   return <div className="editor-grid">
@@ -56,6 +58,7 @@ export function TrackEditor({ track, role, artists, labels, mediaAssets, legacyP
         {canWrite && track.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save draft</button></div>}
       </form>
       <ArtworkPicker value={artworkAssetId} assets={mediaAssets} canWrite={canWrite && track.status !== "ARCHIVED"} onChange={setArtworkAssetId} />
+      <AudioPicker value={audioAssetId} assets={audioAssets} canWrite={canWrite && track.status !== "ARCHIVED"} onChange={setAudioAssetId} />
       {canWrite && <section className="panel publish-panel"><h2>Publication</h2><p className="muted">Publishing and scheduling freeze the current draft, Artist delivery names, and Label legacy value.</p><div className="button-row wrap">
         {track.status !== "ARCHIVED" && <button className="button" disabled={pending} onClick={() => perform("publish", { expectedWorkingVersion: track.workingVersion })}>Publish now</button>}
         {track.status === "PUBLISHED" && <button className="button" disabled={pending} onClick={() => perform("unpublish")}>Unpublish</button>}

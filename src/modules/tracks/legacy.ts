@@ -2,9 +2,9 @@ import type { MediaAsset, TrackRevision } from "@/generated/prisma/client";
 import { isLegacyAuthorized, legacyUnauthorized } from "@/modules/artists/legacy";
 import { formatLegacyDuration } from "@/modules/tracks/duration";
 import { getPublishedTrackForLegacy, listPublishedTracksForLegacy } from "@/modules/tracks/service";
-import { LegacyMediaSerializer } from "@/modules/media/legacy";
+import { LegacyAudioSerializer, LegacyMediaSerializer } from "@/modules/media/legacy";
 
-export function serializeLegacyTrack(revision: TrackRevision & { artworkAsset?: MediaAsset | null }, legacyId: number) {
+export function serializeLegacyTrack(revision: TrackRevision & { artworkAsset?: MediaAsset | null; audioAsset?: MediaAsset | null }, legacyId: number) {
   const covers = LegacyMediaSerializer.covers(revision.artworkAsset);
   return {
     id: String(legacyId),
@@ -31,12 +31,12 @@ export function serializeLegacyTrack(revision: TrackRevision & { artworkAsset?: 
     traxsource_link: revision.traxsourceUrl,
     spotify_link: revision.spotifyUrl,
     soundcloud_link: revision.soundcloudUrl,
-    file_id: null,
+    file_id: LegacyAudioSerializer.track(revision.audioAsset),
     artist_name: revision.primaryArtistName,
   };
 }
 
-function envelope(tracks: Array<{ legacyId: number; publishedRevision: TrackRevision | null }>, pagination?: { total: number; limit: string; offset: string }) {
+function envelope(tracks: Array<{ legacyId: number; publishedRevision: (TrackRevision & { artworkAsset?: MediaAsset | null; audioAsset?: MediaAsset | null }) | null }>, pagination?: { total: number; limit: string; offset: string }) {
   return {
     ...(pagination ? { total_rows: pagination.total } : {}),
     tracks: tracks.map((track) => {

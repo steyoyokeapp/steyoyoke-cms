@@ -43,6 +43,7 @@ enum AuditAction {
 
 enum MediaKind {
   IMAGE
+  AUDIO
 }
 
 enum MediaStatus {
@@ -273,6 +274,7 @@ model Track {
   appleMusicUrl       String?
   soundcloudUrl       String?
   artworkAssetId      String?         @db.Uuid
+  audioAssetId        String?         @db.Uuid
   status              TrackStatus     @default(DRAFT)
   workingVersion      Int             @default(1)
   publishedRevisionId String?         @db.Uuid
@@ -290,6 +292,7 @@ model Track {
   auditLogs           TrackAuditLog[]
   releaseTracks       ReleaseTrack[]
   artworkAsset        MediaAsset?     @relation("TrackArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
+  audioAsset          MediaAsset?     @relation("TrackAudio", fields: [audioAssetId], references: [id], onDelete: Restrict)
 
   @@index([primaryArtistId])
   @@index([secondaryArtistId])
@@ -297,6 +300,7 @@ model Track {
   @@index([status])
   @@index([scheduledFor])
   @@index([artworkAssetId])
+  @@index([audioAssetId])
   @@map("tracks")
 }
 
@@ -323,6 +327,7 @@ model TrackRevision {
   appleMusicUrl           String?
   soundcloudUrl           String?
   artworkAssetId          String?                @db.Uuid
+  audioAssetId            String?                @db.Uuid
   createdById             String                 @db.Uuid
   createdAt               DateTime               @default(now()) @db.Timestamptz(6)
   track                   Track                  @relation("TrackRevisions", fields: [trackId], references: [id], onDelete: Restrict)
@@ -334,6 +339,7 @@ model TrackRevision {
   scheduledForTracks      Track[]                @relation("ScheduledTrackRevision")
   releaseRevisionTracks   ReleaseRevisionTrack[]
   artworkAsset            MediaAsset?            @relation("TrackRevisionArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
+  audioAsset              MediaAsset?            @relation("TrackRevisionAudio", fields: [audioAssetId], references: [id], onDelete: Restrict)
 
   @@unique([trackId, revisionNumber])
   @@unique([trackId, id])
@@ -342,6 +348,7 @@ model TrackRevision {
   @@index([labelId])
   @@index([createdById])
   @@index([artworkAssetId])
+  @@index([audioAssetId])
   @@map("track_revisions")
 }
 
@@ -370,6 +377,7 @@ model PodcastEpisode {
   episodeDate         DateTime?                @db.Date
   durationMs          Int?
   artworkAssetId      String?                  @db.Uuid
+  audioAssetId        String?                  @db.Uuid
   status              PodcastStatus            @default(DRAFT)
   workingVersion      Int                      @default(1)
   publishedRevisionId String?                  @db.Uuid
@@ -387,6 +395,7 @@ model PodcastEpisode {
   scheduledRevision   PodcastEpisodeRevision?  @relation("ScheduledPodcastRevision", fields: [id, scheduledRevisionId], references: [episodeId, id], onDelete: Restrict)
   auditLogs           PodcastAuditLog[]
   artworkAsset        MediaAsset?              @relation("PodcastArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
+  audioAsset          MediaAsset?              @relation("PodcastAudio", fields: [audioAssetId], references: [id], onDelete: Restrict)
 
   @@index([primaryArtistId])
   @@index([secondaryArtistId])
@@ -395,6 +404,7 @@ model PodcastEpisode {
   @@index([status])
   @@index([scheduledFor])
   @@index([artworkAssetId])
+  @@index([audioAssetId])
   @@map("podcast_episodes")
 }
 
@@ -433,6 +443,7 @@ model PodcastEpisodeRevision {
   episodeDate             DateTime                 @db.Date
   durationMs              Int?
   artworkAssetId          String?                  @db.Uuid
+  audioAssetId            String?                  @db.Uuid
   createdById             String                   @db.Uuid
   createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
   episode                 PodcastEpisode           @relation("PodcastRevisions", fields: [episodeId], references: [id], onDelete: Restrict)
@@ -444,6 +455,7 @@ model PodcastEpisodeRevision {
   publishedByEpisodes     PodcastEpisode[]         @relation("PublishedPodcastRevision")
   scheduledForEpisodes    PodcastEpisode[]         @relation("ScheduledPodcastRevision")
   artworkAsset            MediaAsset?              @relation("PodcastRevisionArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
+  audioAsset              MediaAsset?              @relation("PodcastRevisionAudio", fields: [audioAssetId], references: [id], onDelete: Restrict)
 
   @@unique([episodeId, revisionNumber])
   @@unique([episodeId, id])
@@ -452,6 +464,7 @@ model PodcastEpisodeRevision {
   @@index([labelId])
   @@index([createdById])
   @@index([artworkAssetId])
+  @@index([audioAssetId])
   @@map("podcast_episode_revisions")
 }
 
@@ -625,13 +638,15 @@ model MediaAsset {
   status                 MediaStatus              @default(UPLOADING)
   provider               String                   @default("LOCAL")
   sourceStorageKey       String                   @unique
-  compatibilityFilename  String                   @unique
+  compatibilityFilename  String?                  @unique
+  legacyAudioId          String?                  @unique
   originalFilename       String
   mimeType               String
   byteSize               Int
   sha256Checksum         String
-  width                  Int
-  height                 Int
+  width                  Int?
+  height                 Int?
+  durationMs             Int?
   createdById            String                   @db.Uuid
   failureReason          String?
   unreferencedAt         DateTime?                @db.Timestamptz(6)
@@ -645,8 +660,12 @@ model MediaAsset {
   artistRevisionImages   ArtistRevision[]         @relation("ArtistRevisionImage")
   trackArtwork           Track[]                  @relation("TrackArtwork")
   trackRevisionArtwork   TrackRevision[]          @relation("TrackRevisionArtwork")
+  trackAudio             Track[]                  @relation("TrackAudio")
+  trackRevisionAudio     TrackRevision[]          @relation("TrackRevisionAudio")
   podcastArtwork         PodcastEpisode[]         @relation("PodcastArtwork")
   podcastRevisionArtwork PodcastEpisodeRevision[] @relation("PodcastRevisionArtwork")
+  podcastAudio           PodcastEpisode[]         @relation("PodcastAudio")
+  podcastRevisionAudio   PodcastEpisodeRevision[] @relation("PodcastRevisionAudio")
   releaseArtwork         Release[]                @relation("ReleaseArtwork")
   releaseRevisionArtwork ReleaseRevision[]        @relation("ReleaseRevisionArtwork")
 

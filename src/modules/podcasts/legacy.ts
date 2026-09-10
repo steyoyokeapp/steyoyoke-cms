@@ -2,7 +2,7 @@ import type { MediaAsset, PodcastChapterRevision, PodcastEpisodeRevision } from 
 import { isLegacyAuthorized, legacyUnauthorized } from "@/modules/artists/legacy";
 import { formatLegacyDuration } from "@/modules/tracks/duration";
 import { getPublishedPodcastForLegacy, listPublishedPodcastsForLegacy } from "@/modules/podcasts/service";
-import { LegacyMediaSerializer } from "@/modules/media/legacy";
+import { LegacyAudioSerializer, LegacyMediaSerializer } from "@/modules/media/legacy";
 
 export function legacyPodcastTitle(title: string) {
   return title.startsWith("Steyoyoke ") ? title.slice(10) : title;
@@ -17,7 +17,7 @@ export function legacyPodcastDate(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-export function serializeLegacyPodcast(revision: PodcastEpisodeRevision & { chapters: PodcastChapterRevision[]; artworkAsset?: MediaAsset | null }, legacyId: number) {
+export function serializeLegacyPodcast(revision: PodcastEpisodeRevision & { chapters: PodcastChapterRevision[]; artworkAsset?: MediaAsset | null; audioAsset?: MediaAsset | null }, legacyId: number) {
   const covers = LegacyMediaSerializer.covers(revision.artworkAsset);
   return {
     id: String(legacyId), title: legacyPodcastTitle(revision.title), description: null, artist: null,
@@ -27,11 +27,11 @@ export function serializeLegacyPodcast(revision: PodcastEpisodeRevision & { chap
     ...covers,
     podcast_link: null, podcast_link_title: null, genre: null, bpm: null, type: "podcast", low_mp3: null, high_mp3: null,
     itunes_link: null, beatport_link: null, web_link: null, traxsource_link: null, spotify_link: null, soundcloud_link: null,
-    file_id: null, artist_name: revision.primaryArtistName,
+    file_id: LegacyAudioSerializer.podcast(revision.audioAsset), artist_name: revision.primaryArtistName,
   };
 }
 
-type Source = { legacyId: number; publishedRevision: (PodcastEpisodeRevision & { chapters: PodcastChapterRevision[]; artworkAsset?: MediaAsset | null }) | null };
+type Source = { legacyId: number; publishedRevision: (PodcastEpisodeRevision & { chapters: PodcastChapterRevision[]; artworkAsset?: MediaAsset | null; audioAsset?: MediaAsset | null }) | null };
 function envelope(episodes: Source[], pagination?: { total: number; limit: string; offset: string }) {
   return {
     ...(pagination ? { total_rows: pagination.total } : {}),

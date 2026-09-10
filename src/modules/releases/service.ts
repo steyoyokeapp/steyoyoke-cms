@@ -224,13 +224,13 @@ const releaseInclude = {
     orderBy: { position: "asc" as const },
   },
   publishedRevision: {
-    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
+    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, audioAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
   },
   scheduledRevision: {
-    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
+    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, audioAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
   },
   revisions: {
-    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
+    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, audioAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
     orderBy: { revisionNumber: "desc" as const },
   },
   auditLogs: { orderBy: { createdAt: "desc" as const }, take: 30, include: { actor: true } },

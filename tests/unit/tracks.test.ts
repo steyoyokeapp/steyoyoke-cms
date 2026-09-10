@@ -8,6 +8,7 @@ import { trackDraftSchema } from "@/modules/tracks/schema";
 const ids = { primary: crypto.randomUUID(), secondary: crypto.randomUUID(), label: crypto.randomUUID() };
 const revision = {
   artworkAssetId: null,
+  audioAssetId: null,
   id: crypto.randomUUID(), trackId: crypto.randomUUID(), revisionNumber: 1, sourceWorkingVersion: 1,
   title: "Raw_Title", primaryArtistId: ids.primary, primaryArtistLegacyId: 400, primaryArtistName: "Published Artist",
   secondaryArtistId: ids.secondary, secondaryArtistLegacyId: 401, secondaryArtistName: "Second",

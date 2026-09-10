@@ -31,7 +31,7 @@ export function serializeLegacyRelease(revision: LegacyReleaseSnapshot, legacyId
   };
 }
 
-export function serializeLegacyReleaseCompleteTrack(revision: TrackRevision & { artworkAsset?: MediaAsset | null }, legacyId: number) {
+export function serializeLegacyReleaseCompleteTrack(revision: TrackRevision & { artworkAsset?: MediaAsset | null; audioAsset?: MediaAsset | null }, legacyId: number) {
   const track = { ...serializeLegacyTrack(revision, legacyId) } as Omit<ReturnType<typeof serializeLegacyTrack>, "artist_name"> & { artist_name?: string };
   delete track.artist_name;
   return { ...track, title: legacyReleaseTitle(revision.title), label: legacyReleaseLabel(revision.labelLegacyValue), artist_track_name: revision.primaryArtistName, secondary_artist_track_name: revision.secondaryArtistName };

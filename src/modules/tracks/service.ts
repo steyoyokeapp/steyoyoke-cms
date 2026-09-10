@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/authorization";
 import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { publishTrackSchema, scheduleTrackSchema, trackDraftSchema, trackListSchema, updateTrackSchema, type TrackDraftInput } from "@/modules/tracks/schema";
-import { assertReadyArtwork, auditMediaAttachment } from "@/modules/media/service";
+import { assertReadyAudio, assertReadyArtwork, auditMediaAttachment } from "@/modules/media/service";
 
 type Tx = Prisma.TransactionClient;
 const urlFields = ["spotifyUrl", "beatportUrl", "traxsourceUrl", "bandcampUrl", "appleMusicUrl", "soundcloudUrl"] as const;
@@ -22,6 +22,7 @@ function draftData(data: ReturnType<typeof trackDraftSchema.parse>) {
     labelId: data.labelId,
     durationMs: data.durationMs ?? null,
     artworkAssetId: data.artworkAssetId || null,
+    audioAssetId: data.audioAssetId || null,
     ...Object.fromEntries(urlFields.map((field) => [field, nullable(data[field])])),
   };
 }
@@ -62,6 +63,7 @@ async function publicationDependencies(tx: Tx, track: Track) {
 
 async function snapshot(tx: Tx, track: Track, createdById: string): Promise<TrackRevision> {
   await assertReadyArtwork(tx, track.artworkAssetId, false);
+  await assertReadyAudio(tx, track.audioAssetId, false);
   const dependencies = await publicationDependencies(tx, track);
   const latest = await tx.trackRevision.aggregate({ where: { trackId: track.id }, _max: { revisionNumber: true } });
   return tx.trackRevision.create({
@@ -76,6 +78,7 @@ async function snapshot(tx: Tx, track: Track, createdById: string): Promise<Trac
       labelId: dependencies.label.id, labelName: dependencies.label.name, labelLegacyValue: dependencies.label.legacyValue,
       durationMs: track.durationMs,
       artworkAssetId: track.artworkAssetId,
+      audioAssetId: track.audioAssetId,
       ...Object.fromEntries(urlFields.map((field) => [field, track[field]])),
       createdById,
     },
@@ -95,6 +98,7 @@ export async function createTrack(actor: Actor, input: TrackDraftInput) {
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const track = await tx.track.create({ data: { id: crypto.randomUUID(), ...draftData(data) } });
       await auditMediaAttachment(tx, actor, null, track.artworkAssetId, { contentType: "TRACK", contentId: track.id });
+      await auditMediaAttachment(tx, actor, null, track.audioAssetId, { contentType: "TRACK_AUDIO", contentId: track.id }, "AUDIO");
       await audit(tx, track, actor.userId, "CREATE");
       return track;
     });
@@ -115,9 +119,11 @@ export async function updateTrackDraft(actor: Actor, id: string, input: unknown)
       if (!label || (!label.active && label.id !== track.labelId)) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const next = draftData(data);
       if (data.artworkAssetId === undefined) next.artworkAssetId = track.artworkAssetId;
+      if (data.audioAssetId === undefined) next.audioAssetId = track.audioAssetId;
       const changedFields = Object.keys(next).filter((key) => String(track[key as keyof Track] ?? "") !== String(next[key as keyof typeof next] ?? ""));
       const updated = await tx.track.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
       await auditMediaAttachment(tx, actor, track.artworkAssetId, updated.artworkAssetId, { contentType: "TRACK", contentId: id });
+      await auditMediaAttachment(tx, actor, track.audioAssetId, updated.audioAssetId, { contentType: "TRACK_AUDIO", contentId: id }, "AUDIO");
       await audit(tx, updated, actor.userId, "EDIT", { changedFields, fromWorkingVersion: track.workingVersion, toWorkingVersion: updated.workingVersion });
       return updated;
     });
@@ -176,8 +182,8 @@ export async function runScheduledTrackPublication(now = new Date()) {
       if (!rows[0]) return false;
       const track = await tx.track.findUnique({ where: { id: candidate.id } });
       if (!track?.scheduledRevisionId) return false;
-      const revision = await tx.trackRevision.findUnique({ where: { id: track.scheduledRevisionId }, include: { artworkAsset: true } });
-      if (!revision || (revision.artworkAssetId && revision.artworkAsset?.status !== "READY")) return false;
+      const revision = await tx.trackRevision.findUnique({ where: { id: track.scheduledRevisionId }, include: { artworkAsset: true, audioAsset: true } });
+      if (!revision || (revision.artworkAssetId && (revision.artworkAsset?.kind !== "IMAGE" || revision.artworkAsset.status !== "READY")) || (revision.audioAssetId && (revision.audioAsset?.kind !== "AUDIO" || revision.audioAsset.status !== "READY"))) return false;
       const updated = await tx.track.update({ where: { id: track.id }, data: { status: TrackStatus.PUBLISHED, publishedRevisionId: track.scheduledRevisionId, scheduledRevisionId: null, scheduledFor: null } });
       await audit(tx, updated, null, "PUBLISH", { revisionId: track.scheduledRevisionId, scheduled: true }); return true;
     });
@@ -220,7 +226,7 @@ export async function restoreTrack(actor: Actor, id: string) {
 
 export async function getTrack(actor: Actor, id: string) {
   requirePermission(actor, "track:read");
-  const track = await prisma.track.findUnique({ where: { id }, include: { primaryArtist: true, secondaryArtist: true, label: true, artworkAsset: true, publishedRevision: { include: { artworkAsset: true } }, scheduledRevision: { include: { artworkAsset: true } }, revisions: { orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } } } });
+  const track = await prisma.track.findUnique({ where: { id }, include: { primaryArtist: true, secondaryArtist: true, label: true, artworkAsset: true, audioAsset: true, publishedRevision: { include: { artworkAsset: true, audioAsset: true } }, scheduledRevision: { include: { artworkAsset: true, audioAsset: true } }, revisions: { orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true, audioAsset: true } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } } } });
   if (!track) throw new AppError("Track not found.", 404, "TRACK_NOT_FOUND"); return track;
 }
 
@@ -241,22 +247,22 @@ export async function getTrackFormOptions(actor: Actor, attached?: { primaryArti
 
 export async function getTrackPreview(actor: Actor, id: string) {
   const track = await getTrack(actor, id);
-  return { id: track.id, legacyId: track.legacyId, title: track.title, primaryArtist: { id: track.primaryArtist.id, name: track.primaryArtist.name }, secondaryArtist: track.secondaryArtist ? { id: track.secondaryArtist.id, name: track.secondaryArtist.name } : null, label: { id: track.label.id, name: track.label.name, legacyValue: track.label.legacyValue }, durationMs: track.durationMs, links: Object.fromEntries(urlFields.map((field) => [field, track[field]])), status: track.status, workingVersion: track.workingVersion };
+  return { id: track.id, legacyId: track.legacyId, title: track.title, primaryArtist: { id: track.primaryArtist.id, name: track.primaryArtist.name }, secondaryArtist: track.secondaryArtist ? { id: track.secondaryArtist.id, name: track.secondaryArtist.name } : null, label: { id: track.label.id, name: track.label.name, legacyValue: track.label.legacyValue }, durationMs: track.durationMs, audio: track.audioAsset ? { mediaAssetId: track.audioAsset.id, filename: track.audioAsset.originalFilename, durationMs: track.audioAsset.durationMs, status: track.audioAsset.status, playbackUrl: `/legacy-audio/${track.audioAsset.legacyAudioId}-high.mp3` } : null, links: Object.fromEntries(urlFields.map((field) => [field, track[field]])), status: track.status, workingVersion: track.workingVersion };
 }
 
 export async function getLegacyTrackPreview(actor: Actor, id: string) {
   requirePermission(actor, "track:read");
-  const track = await prisma.track.findUnique({ where: { id }, include: { publishedRevision: { include: { artworkAsset: true } } } });
+  const track = await prisma.track.findUnique({ where: { id }, include: { publishedRevision: { include: { artworkAsset: true, audioAsset: true } } } });
   if (!track) throw new AppError("Track not found.", 404, "TRACK_NOT_FOUND");
   return track.publishedRevision && (track.status === TrackStatus.PUBLISHED || track.status === TrackStatus.SCHEDULED) ? track : null;
 }
 
 export async function listPublishedTracksForLegacy(limit?: number, offset = 0) {
   const where: Prisma.TrackWhereInput = { publishedRevisionId: { not: null }, status: { in: [TrackStatus.PUBLISHED, TrackStatus.SCHEDULED] } };
-  const [tracks, total] = await prisma.$transaction([prisma.track.findMany({ where, include: { publishedRevision: { include: { artworkAsset: true } } }, orderBy: { legacyId: "desc" }, take: limit, skip: offset }), prisma.track.count({ where })]);
+  const [tracks, total] = await prisma.$transaction([prisma.track.findMany({ where, include: { publishedRevision: { include: { artworkAsset: true, audioAsset: true } } }, orderBy: { legacyId: "desc" }, take: limit, skip: offset }), prisma.track.count({ where })]);
   return { tracks, total };
 }
 
 export async function getPublishedTrackForLegacy(legacyId: number) {
-  return prisma.track.findFirst({ where: { legacyId, publishedRevisionId: { not: null }, status: { in: [TrackStatus.PUBLISHED, TrackStatus.SCHEDULED] } }, include: { publishedRevision: { include: { artworkAsset: true } } } });
+  return prisma.track.findFirst({ where: { legacyId, publishedRevisionId: { not: null }, status: { in: [TrackStatus.PUBLISHED, TrackStatus.SCHEDULED] } }, include: { publishedRevision: { include: { artworkAsset: true, audioAsset: true } } } });
 }
