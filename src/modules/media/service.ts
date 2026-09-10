@@ -7,12 +7,12 @@ import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { processImage } from "@/modules/media/image";
 import { processAudio } from "@/modules/media/audio";
-import { localStorage, type StorageProvider } from "@/modules/media/storage";
+import { mediaStorage, type StorageProvider } from "@/modules/media/storage";
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 type Db = Prisma.TransactionClient | typeof prisma;
 
-export async function createAndProcessImage(actor: Actor, file: { name: string; bytes: Buffer }, storage: StorageProvider = localStorage) {
+export async function createAndProcessImage(actor: Actor, file: { name: string; bytes: Buffer }, storage: StorageProvider = mediaStorage) {
   requirePermission(actor, "media:upload");
   const id = crypto.randomUUID();
   try {
@@ -22,7 +22,7 @@ export async function createAndProcessImage(actor: Actor, file: { name: string; 
     const sourceStorageKey = `images/${id}/source.${sourceExtension}`;
     const compatibilityFilename = `${id}.${original.extension}`;
     const asset = await prisma.mediaAsset.create({ data: {
-      id, kind: "IMAGE", status: "PROCESSING", provider: "LOCAL", sourceStorageKey, compatibilityFilename,
+      id, kind: "IMAGE", status: "PROCESSING", provider: storage.kind, sourceStorageKey, compatibilityFilename,
       originalFilename: file.name.slice(0, 255) || "upload", mimeType: original.mimeType, byteSize: file.bytes.length,
       sha256Checksum: processed.sourceChecksum, width: processed.sourceWidth, height: processed.sourceHeight, createdById: actor.userId,
     } });
@@ -52,11 +52,11 @@ export async function createAndProcessImage(actor: Actor, file: { name: string; 
   }
 }
 
-export async function createAndProcessAudio(actor: Actor, file: { name: string; bytes: Buffer }, storage: StorageProvider = localStorage) {
+export async function createAndProcessAudio(actor: Actor, file: { name: string; bytes: Buffer }, storage: StorageProvider = mediaStorage) {
   requirePermission(actor, "media:upload"); const id = crypto.randomUUID(); const legacyAudioId = crypto.randomUUID();
   try {
     const processed = await processAudio(file.bytes); const sourceStorageKey = `audio/${id}/source.${processed.extension}`;
-    const asset = await prisma.mediaAsset.create({ data: { id, kind: "AUDIO", status: "PROCESSING", provider: "LOCAL", sourceStorageKey, compatibilityFilename: null, legacyAudioId, originalFilename: file.name.slice(0, 255) || "audio.mp3", mimeType: processed.mimeType, byteSize: file.bytes.length, sha256Checksum: processed.sha256Checksum, width: null, height: null, durationMs: processed.durationMs, createdById: actor.userId } });
+    const asset = await prisma.mediaAsset.create({ data: { id, kind: "AUDIO", status: "PROCESSING", provider: storage.kind, sourceStorageKey, compatibilityFilename: null, legacyAudioId, originalFilename: file.name.slice(0, 255) || "audio.mp3", mimeType: processed.mimeType, byteSize: file.bytes.length, sha256Checksum: processed.sha256Checksum, width: null, height: null, durationMs: processed.durationMs, createdById: actor.userId } });
     try {
       await storage.put(sourceStorageKey, file.bytes);
       return await prisma.$transaction(async (tx) => {
@@ -143,7 +143,7 @@ export async function retireMedia(actor: Actor, id: string) {
   });
 }
 
-export async function purgeEligibleMedia(actor: Actor, now = new Date(), storage: StorageProvider = localStorage) {
+export async function purgeEligibleMedia(actor: Actor, now = new Date(), storage: StorageProvider = mediaStorage) {
   requirePermission(actor, "media:purge"); const cutoff = new Date(now.getTime() - RETENTION_MS);
   const candidates = await prisma.mediaAsset.findMany({ where: { unreferencedAt: { lte: cutoff } }, include: { variants: true } }); let purged = 0;
   for (const candidate of candidates) {

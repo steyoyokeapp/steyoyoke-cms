@@ -7,6 +7,8 @@ import { stableUuid, migrationSlug } from "./identity";
 import { loadLegacySnapshot } from "./legacy-dump";
 import { RehearsalMediaImporter } from "./media";
 import { LEGACY_MEDIA_ROOT, LEGACY_SNAPSHOT, REHEARSAL_OUTPUT_ROOT, REHEARSAL_REPORT_PATH, REHEARSAL_STORAGE_ROOT, rehearsalDatabaseUrl } from "./config";
+import { LocalStorageProvider, createStorageProvider, type StorageProvider } from "../../src/modules/media/storage";
+import { log } from "../../src/lib/logger";
 import type { Analysis, MigrationIssueInput, RawRow } from "./types";
 import { NORMALIZATION_RULES_VERSION } from "./policy";
 
@@ -141,14 +143,13 @@ async function setSequences(db: PrismaClient, analysis: Analysis) {
   return { artistNext: artistMax + 1, trackNext: trackMax + 1, releaseNext: releaseMax + 1 };
 }
 
-export async function runRehearsal() {
-  const databaseUrl = rehearsalDatabaseUrl(); await resetOutput(); await resetRehearsalDatabase(databaseUrl); applyMigrations(databaseUrl);
+async function executeImport(databaseUrl: string, storage: StorageProvider, reportPath: string) {
   const db = migrationClient(databaseUrl);
   try {
-    const empty = await initialCounts(db); if (Object.values(empty).some((count) => count !== 0)) throw new Error("Dedicated rehearsal database was not empty after reset."); await seedRehearsal(db);
+    const empty = await initialCounts(db); if (Object.values(empty).some((count) => count !== 0)) throw new Error("Target catalogue database must be empty before import."); await seedRehearsal(db);
     const loaded = await loadLegacySnapshot(LEGACY_SNAPSHOT); const analysis = await analyzeCatalogue(loaded.sourceSha256, loaded.catalogue, LEGACY_MEDIA_ROOT); const issues = [...analysis.issues];
     const runId = stableUuid("migration-run", loaded.sourceSha256); await db.migrationRun.create({ data: { id: runId, sourceSha256: loaded.sourceSha256 } });
-    const media = new RehearsalMediaImporter(db, REHEARSAL_STORAGE_ROOT, ACTOR_ID); const artwork = await importArtwork(media, analysis, issues);
+    const media = new RehearsalMediaImporter(db, storage, ACTOR_ID); const artwork = await importArtwork(media, analysis, issues);
     const artistResult = await importArtists(db, analysis, artwork); const contentResult = await importTracksAndPodcasts(db, analysis, artwork, media); const releaseResult = await importReleases(db, analysis, artwork, issues); const sequences = await setSequences(db, analysis);
     const severity = Object.fromEntries(["BLOCKER", "WARNING", "COMPATIBILITY", "INFORMATIONAL"].map((level) => [level, issues.filter((candidate) => candidate.severity === level).length]));
     const rejectedChapterLines = [...analysis.chapters.values()].flatMap((chapter) => chapter.rejected);
@@ -156,7 +157,38 @@ export async function runRehearsal() {
     const summary = { source: analysis.counts, initialEmptyCounts: empty, imported: { artists: artistResult.imported, tracks: contentResult.tracks, podcasts: contentResult.podcasts, releases: releaseResult.releases, releaseTracks: releaseResult.releaseTracks, podcastChapters: contentResult.chapters, imageAssets: media.imageCount, historicalAudioReferences: media.audioCount, revisions: artistResult.revisions + contentResult.revisions + releaseResult.revisions, releaseRevisionTracks: releaseResult.revisionTracks }, blocked: { artists: analysis.counts.artists - artistResult.imported, tracks: analysis.counts.tracks - contentResult.tracks, podcasts: analysis.counts.podcasts - contentResult.podcasts, releases: analysis.counts.releases - releaseResult.releases, releaseTracks: analysis.counts.releaseTracks - releaseResult.releaseTracks }, severity, labels: analysis.labels, sequences, chapterReview, normalizationRulesVersion: NORMALIZATION_RULES_VERSION, sourceSha256: loaded.sourceSha256 };
     for (let index = 0; index < issues.length; index += 500) await db.migrationIssue.createMany({ data: issues.slice(index, index + 500).map((candidate, offset) => ({ id: stableUuid("migration-issue", `${index + offset}:${candidate.sourceTable}:${candidate.sourceLegacyId}:${candidate.field}:${candidate.problem}`), runId, ...candidate })) });
     await db.migrationRun.update({ where: { id: runId }, data: { completedAt: new Date(), summary: summary as Prisma.InputJsonValue } });
-    await writeFile(REHEARSAL_REPORT_PATH, JSON.stringify({ generatedAt: new Date().toISOString(), summary, issues }, null, 2), { mode: 0o600 });
+    await writeFile(reportPath, JSON.stringify({ generatedAt: new Date().toISOString(), summary, issues }, null, 2), { mode: 0o600 });
     return { summary, issues, runId, databaseUrl };
   } finally { await db.$disconnect(); }
+}
+
+export async function runRehearsal() {
+  const databaseUrl = rehearsalDatabaseUrl(); await resetOutput(); await resetRehearsalDatabase(databaseUrl); applyMigrations(databaseUrl);
+  return executeImport(databaseUrl, new LocalStorageProvider(REHEARSAL_STORAGE_ROOT), REHEARSAL_REPORT_PATH);
+}
+
+export async function runStagingImport() {
+  const databaseUrl = process.env.STAGING_DATABASE_URL;
+  if (!databaseUrl) throw new Error("STAGING_DATABASE_URL is required.");
+  const target = new URL(databaseUrl);
+  if (target.pathname !== "/steyoyoke_cms_staging") throw new Error("Staging import is restricted to the steyoyoke_cms_staging database.");
+  if (process.env.STAGING_CONFIRM_NON_PRODUCTION !== "steyoyoke_cms_staging") throw new Error("Set STAGING_CONFIRM_NON_PRODUCTION=steyoyoke_cms_staging after verifying the target is non-production.");
+  const loaded = await loadLegacySnapshot(LEGACY_SNAPSHOT);
+  if (loaded.sourceSha256 !== "180d16528b61f4520cdce86dcc793953dc747804e61d5e61dd019b71a6e48141") throw new Error("Legacy SQL snapshot SHA-256 does not match the approved Phase 12 snapshot.");
+  const outputRoot = path.join(process.cwd(), ".staging-migration");
+  await mkdir(outputRoot, { recursive: true, mode: 0o700 });
+  const storage = createStorageProvider(process.env);
+  log("info", "staging_migration_start", { sourceSha256: loaded.sourceSha256, storageProvider: storage.kind });
+  applyMigrations(databaseUrl);
+  const result = await executeImport(databaseUrl, storage, path.join(outputRoot, "quality-report.json"));
+  log("info", "staging_migration_complete", {
+    runId: result.runId,
+    artists: result.summary.imported.artists,
+    tracks: result.summary.imported.tracks,
+    podcasts: result.summary.imported.podcasts,
+    releases: result.summary.imported.releases,
+    imageAssets: result.summary.imported.imageAssets,
+    audioReferences: result.summary.imported.historicalAudioReferences,
+  });
+  return result;
 }

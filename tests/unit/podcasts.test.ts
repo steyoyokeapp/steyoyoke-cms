@@ -31,6 +31,18 @@ describe("Podcast legacy transformations", () => {
     expect(result).toMatchObject({ id: "3338", title: "Example", date: "2026-01-02", duration: "01:03:45", label: "STEYOYOKE BLACK", type: "podcast", file_id: null, artist_name: "Published Artist" });
     expect(result.artist_feature_times).toEqual([{ duration: "00:03:45", title: "Opening", id: "", artist: "Artist A" }]);
   });
+  it("preserves multilingual punctuation and UTF-8 chapter text deterministically", () => {
+    const special = [
+      { artist: "Beyoncé & O’Connor", title: "L'été -- intro – bridge — finale; live 🎛️" },
+      { artist: "София", title: "Привет — мир" },
+      { artist: "ليلى", title: "موسيقى؛ بداية" },
+    ].map((chapter, position) => ({ id: crypto.randomUUID(), episodeRevisionId: revisionId, sourceChapterId: null, position, legacyReference: null, durationMs: position * 1000, ...chapter })) satisfies PodcastChapterRevision[];
+    const first = serializeLegacyPodcast({ ...revision, title: "Steyoyoke Épisode — ليلى 🎧", chapters: special }, 3338);
+    const second = serializeLegacyPodcast({ ...revision, title: "Steyoyoke Épisode — ليلى 🎧", chapters: special }, 3338);
+    expect(first.title).toBe("Épisode — ليلى 🎧");
+    expect(first.artist_feature_times.map(({ artist, title }) => ({ artist, title }))).toEqual(special.map(({ artist, title }) => ({ artist, title })));
+    expect(JSON.parse(JSON.stringify(first))).toEqual(second);
+  });
   it("enforces Podcast-specific permissions", () => {
     expect(() => requirePermission({ userId: crypto.randomUUID(), role: "EDITOR" }, "podcast:write")).not.toThrow();
     expect(() => requirePermission({ userId: crypto.randomUUID(), role: "VIEWER" }, "podcast:read")).not.toThrow();

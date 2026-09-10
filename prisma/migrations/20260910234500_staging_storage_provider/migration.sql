@@ -1,0 +1,1 @@
+ALTER TYPE "MediaProvider" ADD VALUE 'S3_COMPATIBLE';

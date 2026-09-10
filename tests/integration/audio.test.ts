@@ -12,7 +12,7 @@ import { serializeLegacyPodcast } from "@/modules/podcasts/legacy";
 import { GET as getAudio } from "@/app/legacy-audio/[filename]/route";
 import { testMp3 } from "../fixtures/audio";
 
-class MemoryStorage implements StorageProvider { files = new Map<string, Buffer>(); async put(key: string, bytes: Buffer) { if (this.files.has(key)) throw new Error("collision"); this.files.set(key, bytes); } async read(key: string) { const value = this.files.get(key); if (!value) throw new Error("missing"); return value; } async exists(key: string) { return this.files.has(key); } async delete(key: string) { this.files.delete(key); } }
+class MemoryStorage implements StorageProvider { readonly kind = "LOCAL" as const; files = new Map<string, Buffer>(); async put(key: string, bytes: Buffer) { if (this.files.has(key)) throw new Error("collision"); this.files.set(key, bytes); } async read(key: string) { const value = this.files.get(key); if (!value) throw new Error("missing"); return value; } async exists(key: string) { return this.files.has(key); } async delete(key: string) { this.files.delete(key); } }
 
 let editor: Actor; let admin: Actor; let labelId: string; let artistId: string; let artworkId: string;
 beforeEach(async () => {

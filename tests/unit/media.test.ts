@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { requirePermission } from "@/lib/authorization";
 import { checksum, IMAGE_VARIANTS, MAX_IMAGE_BYTES, processImage } from "@/modules/media/image";
 import { LegacyMediaSerializer } from "@/modules/media/legacy";
-import { LocalStorageProvider } from "@/modules/media/storage";
+import { createStorageProvider, LocalStorageProvider, S3StorageProvider } from "@/modules/media/storage";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
@@ -41,6 +41,29 @@ describe("local image processing", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "steyoyoke-media-")); roots.push(root); const storage = new LocalStorageProvider(root);
     await storage.put("images/test/source.jpg", Buffer.from("safe")); expect(await storage.exists("images/test/source.jpg")).toBe(true); expect((await storage.read("images/test/source.jpg")).toString()).toBe("safe");
     await expect(storage.read("../secret.jpg")).rejects.toMatchObject({ code: "INVALID_STORAGE_KEY" }); await storage.delete("images/test/source.jpg"); expect(await storage.exists("images/test/source.jpg")).toBe(false);
+  });
+
+  it("uses private immutable S3-compatible object operations behind the same safe key boundary", async () => {
+    const commands: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const client = { send: async (command: { constructor: { name: string }; input: Record<string, unknown> }) => {
+      commands.push({ name: command.constructor.name, input: command.input });
+      if (command.constructor.name === "GetObjectCommand") return { Body: { transformToByteArray: async () => new Uint8Array(Buffer.from("remote")) } };
+      return {};
+    } };
+    const storage = new S3StorageProvider({ bucket: "staging-media", region: "test", prefix: "/cms-staging/", client: client as never });
+    await storage.put("images/id/source.jpg", Buffer.from("remote"));
+    expect((await storage.read("images/id/source.jpg")).toString()).toBe("remote");
+    expect(await storage.exists("images/id/source.jpg")).toBe(true);
+    await storage.delete("images/id/source.jpg");
+    expect(commands.map(({ name }) => name)).toEqual(["PutObjectCommand", "GetObjectCommand", "HeadObjectCommand", "DeleteObjectCommand"]);
+    expect(commands[0]!.input).toMatchObject({ Bucket: "staging-media", Key: "cms-staging/images/id/source.jpg", IfNoneMatch: "*" });
+    await expect(storage.read("../secret.jpg")).rejects.toMatchObject({ code: "INVALID_STORAGE_KEY" });
+  });
+
+  it("requires explicit complete S3-compatible storage configuration", () => {
+    expect(createStorageProvider({ MEDIA_STORAGE_PROVIDER: "local", MEDIA_STORAGE_ROOT: "/tmp/steyoyoke-test" })).toBeInstanceOf(LocalStorageProvider);
+    expect(() => createStorageProvider({ MEDIA_STORAGE_PROVIDER: "s3" })).toThrow(/MEDIA_S3_BUCKET/);
+    expect(() => createStorageProvider({ MEDIA_STORAGE_PROVIDER: "s3", MEDIA_S3_BUCKET: "staging", MEDIA_S3_ACCESS_KEY_ID: "partial" })).toThrow(/Both/);
   });
 
   it("enforces media permissions by role", () => {

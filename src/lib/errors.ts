@@ -18,9 +18,10 @@ export function errorResponse(error: unknown): Response {
     );
   }
 
-  console.error(error);
+  log("error", "internal_error", { errorName: error instanceof Error ? error.name : "UnknownError" });
   return Response.json(
     { error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred." } },
     { status: 500 },
   );
 }
+import { log } from "@/lib/logger";

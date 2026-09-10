@@ -1,0 +1,86 @@
+name: steyoyoke-cms-staging
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: steyoyoke_cms_staging
+      POSTGRES_USER: steyoyoke_cms_staging
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set STAGING_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U steyoyoke_cms_staging -d steyoyoke_cms_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - staging-postgres:/var/lib/postgresql/data
+    networks: [private]
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${STAGING_MINIO_ACCESS_KEY:?set STAGING_MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STAGING_MINIO_SECRET_KEY:?set STAGING_MINIO_SECRET_KEY}
+    volumes:
+      - staging-media:/data
+    networks: [private]
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on: [minio]
+    entrypoint: ["/bin/sh", "-c"]
+    command: >-
+      until mc alias set staging http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 2; done;
+      mc mb --ignore-existing staging/steyoyoke-cms-staging;
+      mc version enable staging/steyoyoke-cms-staging
+    environment:
+      MINIO_ROOT_USER: ${STAGING_MINIO_ACCESS_KEY:?set STAGING_MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STAGING_MINIO_SECRET_KEY:?set STAGING_MINIO_SECRET_KEY}
+    networks: [private]
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      DATABASE_URL: postgresql://steyoyoke_cms_staging:${STAGING_POSTGRES_PASSWORD}@postgres:5432/steyoyoke_cms_staging?schema=public
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [private]
+
+  app:
+    build:
+      context: .
+      target: runner
+    environment:
+      DATABASE_URL: postgresql://steyoyoke_cms_staging:${STAGING_POSTGRES_PASSWORD}@postgres:5432/steyoyoke_cms_staging?schema=public
+      BETTER_AUTH_SECRET: ${STAGING_BETTER_AUTH_SECRET:?set STAGING_BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${STAGING_BASE_URL:-http://127.0.0.1:3000}
+      APP_BASE_URL: ${STAGING_BASE_URL:-http://127.0.0.1:3000}
+      LEGACY_API_KEY_A: ${STAGING_LEGACY_API_KEY_A:?set STAGING_LEGACY_API_KEY_A}
+      LEGACY_API_KEY_B: ${STAGING_LEGACY_API_KEY_B:?set STAGING_LEGACY_API_KEY_B}
+      LEGACY_AUDIO_BASE_URL: ${STAGING_LEGACY_AUDIO_BASE_URL:-/legacy-audio}
+      MEDIA_STORAGE_PROVIDER: s3
+      MEDIA_S3_BUCKET: steyoyoke-cms-staging
+      MEDIA_S3_REGION: us-east-1
+      MEDIA_S3_ENDPOINT: http://minio:9000
+      MEDIA_S3_ACCESS_KEY_ID: ${STAGING_MINIO_ACCESS_KEY:?set STAGING_MINIO_ACCESS_KEY}
+      MEDIA_S3_SECRET_ACCESS_KEY: ${STAGING_MINIO_SECRET_KEY:?set STAGING_MINIO_SECRET_KEY}
+      MEDIA_S3_FORCE_PATH_STYLE: "true"
+      MEDIA_S3_PREFIX: cms
+      SCHEDULED_PUBLISHER_ENABLED: ${SCHEDULED_PUBLISHER_ENABLED:-false}
+      SCHEDULED_PUBLISHER_SECRET: ${STAGING_SCHEDULED_PUBLISHER_SECRET:?set STAGING_SCHEDULED_PUBLISHER_SECRET}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    ports: ["127.0.0.1:3000:3000"]
+    networks: [private]
+
+volumes:
+  staging-postgres:
+  staging-media:
+
+networks:
+  private:
+    internal: true

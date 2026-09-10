@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { analyzeCatalogue, classifyRejectedChapterLine } from "./analysis";
 import { compareRehearsal } from "./compare";
 import { LEGACY_MEDIA_ROOT, LEGACY_SNAPSHOT, REHEARSAL_OUTPUT_ROOT, REHEARSAL_REPORT_PATH } from "./config";
-import { runRehearsal } from "./importer";
+import { runRehearsal, runStagingImport } from "./importer";
 import { loadLegacySnapshot } from "./legacy-dump";
 import { writeMigrationManifest } from "./manifest";
 
@@ -27,6 +27,6 @@ async function compare() {
 }
 
 const command = process.argv[2];
-const result = command === "analyze" ? await analyze() : command === "rehearse-import" ? await runRehearsal().then(({ summary }) => summary) : command === "compare" ? await compare() : command === "report" ? await report() : command === "manifest" ? await writeMigrationManifest() : null;
-if (!result) throw new Error("Use analyze, rehearse-import, compare, report, or manifest.");
+const result = command === "analyze" ? await analyze() : command === "rehearse-import" ? await runRehearsal().then(({ summary }) => summary) : command === "staging-import" ? await runStagingImport().then(({ summary }) => summary) : command === "compare" ? await compare() : command === "report" ? await report() : command === "manifest" ? await writeMigrationManifest() : null;
+if (!result) throw new Error("Use analyze, rehearse-import, staging-import, compare, report, or manifest.");
 console.log(JSON.stringify(result, null, 2));

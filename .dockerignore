@@ -1,0 +1,16 @@
+.git
+.next
+node_modules
+.env*
+!.env.example
+.local-storage
+.migration-rehearsal
+coverage
+playwright-report
+test-results
+*.sql
+*.dump
+*.bak
+*.pem
+*.key
+docs

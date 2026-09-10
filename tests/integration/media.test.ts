@@ -12,6 +12,7 @@ import { GET as getLegacyMedia } from "@/app/assets/uploads/files/[...path]/rout
 import { localStorage } from "@/modules/media/storage";
 
 class MemoryStorage implements StorageProvider {
+  readonly kind = "LOCAL" as const;
   files = new Map<string, Buffer>();
   async put(key: string, bytes: Buffer) { if (this.files.has(key)) throw new Error("immutable collision"); this.files.set(key, bytes); }
   async read(key: string) { const value = this.files.get(key); if (!value) throw new Error("missing"); return value; }

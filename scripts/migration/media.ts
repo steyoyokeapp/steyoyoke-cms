@@ -2,16 +2,16 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import { processImage } from "../../src/modules/media/image";
-import { LocalStorageProvider } from "../../src/modules/media/storage";
+import type { StorageProvider } from "../../src/modules/media/storage";
 import { stableUuid } from "./identity";
 
 export class RehearsalMediaImporter {
   private readonly images = new Map<string, string>();
   private readonly audio = new Map<string, string>();
-  readonly storage: LocalStorageProvider;
+  readonly storage: StorageProvider;
 
-  constructor(private readonly db: PrismaClient, storageRoot: string, private readonly actorId: string) {
-    this.storage = new LocalStorageProvider(storageRoot);
+  constructor(private readonly db: PrismaClient, storage: StorageProvider, private readonly actorId: string) {
+    this.storage = storage;
   }
 
   async image(sourcePath: string) {
@@ -26,7 +26,7 @@ export class RehearsalMediaImporter {
       await this.storage.put(storageKey, variant.bytes);
       variants.push({ id: stableUuid("image-variant", `${sourcePath}:${variant.variantKey}`), variantKey: variant.variantKey, storageKey, mimeType: variant.mimeType, byteSize: variant.bytes.length, sha256Checksum: variant.sha256Checksum, width: variant.width, height: variant.height });
     }
-    await this.db.mediaAsset.create({ data: { id, kind: "IMAGE", status: "READY", provider: "LOCAL", sourceStorageKey, compatibilityFilename, originalFilename: path.basename(sourcePath), mimeType: original.mimeType, byteSize: bytes.length, sha256Checksum: processed.sourceChecksum, width: processed.sourceWidth, height: processed.sourceHeight, createdById: this.actorId, variants: { createMany: { data: variants } } } });
+    await this.db.mediaAsset.create({ data: { id, kind: "IMAGE", status: "READY", provider: this.storage.kind, sourceStorageKey, compatibilityFilename, originalFilename: path.basename(sourcePath), mimeType: original.mimeType, byteSize: bytes.length, sha256Checksum: processed.sourceChecksum, width: processed.sourceWidth, height: processed.sourceHeight, createdById: this.actorId, variants: { createMany: { data: variants } } } });
     this.images.set(sourcePath, id); return id;
   }
 

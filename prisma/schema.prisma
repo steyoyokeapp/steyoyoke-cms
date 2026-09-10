@@ -58,6 +58,7 @@ enum MediaStatus {
 
 enum MediaProvider {
   LOCAL
+  S3_COMPATIBLE
   LEGACY_EXTERNAL
 }
 
