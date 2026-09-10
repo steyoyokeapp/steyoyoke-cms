@@ -26,9 +26,10 @@ npm run migration:analyze
 npm run migration:rehearse
 npm run migration:compare
 npm run migration:report
+npm run migration:manifest
 ```
 
-`analyze` parses and classifies the source without a database write. `rehearse` resets the dedicated schema, applies all Prisma migrations, regenerates local canonical image variants, imports valid content and initial immutable revisions, advances legacy-ID sequences, and persists sanitized issues. `compare` projects the imported revisions through the new legacy serializers across the full imported catalogue and verifies local image storage paths. `report` prints only aggregate quality and comparison results.
+`analyze` parses and classifies the source without a database write. `rehearse` resets the dedicated schema, applies all Prisma migrations, regenerates local canonical image variants, imports valid content and initial immutable revisions, advances legacy-ID sequences, and persists sanitized issues. `compare` projects the imported revisions through the new legacy serializers across the full imported catalogue and verifies local image storage paths. `report` prints only aggregate quality and comparison results. `manifest` writes the deterministic migration freeze manifest from the completed report and comparison.
 
 ## Mapping policy
 

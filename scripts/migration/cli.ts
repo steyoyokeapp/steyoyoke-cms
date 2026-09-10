@@ -1,14 +1,16 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { analyzeCatalogue } from "./analysis";
+import { analyzeCatalogue, classifyRejectedChapterLine } from "./analysis";
 import { compareRehearsal } from "./compare";
 import { LEGACY_MEDIA_ROOT, LEGACY_SNAPSHOT, REHEARSAL_OUTPUT_ROOT, REHEARSAL_REPORT_PATH } from "./config";
 import { runRehearsal } from "./importer";
 import { loadLegacySnapshot } from "./legacy-dump";
+import { writeMigrationManifest } from "./manifest";
 
 async function analyze() {
   const loaded = await loadLegacySnapshot(LEGACY_SNAPSHOT); const result = await analyzeCatalogue(loaded.sourceSha256, loaded.catalogue, LEGACY_MEDIA_ROOT);
   const severity = Object.fromEntries(["BLOCKER", "WARNING", "COMPATIBILITY", "INFORMATIONAL"].map((level) => [level, result.issues.filter((issue) => issue.severity === level).length]));
-  const summary = { sourceSha256: result.sourceSha256, counts: result.counts, labels: result.labels, severity, chapterParsing: Object.fromEntries(["PARSED CLEANLY", "PARSED WITH WARNING", "UNPARSEABLE"].map((classification) => [classification, [...result.chapters.values()].filter((chapter) => chapter.classification === classification).length])) };
+  const rejected = [...result.chapters.values()].flatMap((chapter) => chapter.rejected);
+  const summary = { sourceSha256: result.sourceSha256, counts: result.counts, labels: result.labels, severity, chapterParsing: Object.fromEntries(["PARSED CLEANLY", "PARSED WITH WARNING", "UNPARSEABLE"].map((classification) => [classification, [...result.chapters.values()].filter((chapter) => chapter.classification === classification).length])), chapterReview: Object.fromEntries([...new Set(rejected.map(classifyRejectedChapterLine))].sort().map((classification) => [classification, rejected.filter((line) => classifyRejectedChapterLine(line) === classification).length])) };
   await mkdir(REHEARSAL_OUTPUT_ROOT, { recursive: true, mode: 0o700 }); await writeFile(REHEARSAL_REPORT_PATH, JSON.stringify({ generatedAt: new Date().toISOString(), summary, issues: result.issues }, null, 2), { mode: 0o600 }); return summary;
 }
 
@@ -25,6 +27,6 @@ async function compare() {
 }
 
 const command = process.argv[2];
-const result = command === "analyze" ? await analyze() : command === "rehearse-import" ? await runRehearsal().then(({ summary }) => summary) : command === "compare" ? await compare() : command === "report" ? await report() : null;
-if (!result) throw new Error("Use analyze, rehearse-import, compare, or report.");
+const result = command === "analyze" ? await analyze() : command === "rehearse-import" ? await runRehearsal().then(({ summary }) => summary) : command === "compare" ? await compare() : command === "report" ? await report() : command === "manifest" ? await writeMigrationManifest() : null;
+if (!result) throw new Error("Use analyze, rehearse-import, compare, report, or manifest.");
 console.log(JSON.stringify(result, null, 2));

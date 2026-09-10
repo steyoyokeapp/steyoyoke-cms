@@ -1,5 +1,5 @@
 import path from "node:path";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import type { Analysis, LegacyCatalogue, MigrationIssueInput, ParsedChapter, RawRow } from "./types";
 
 export const LABEL_MAP: Record<string, string> = {
@@ -46,24 +46,39 @@ export function parseLegacyDuration(value: string | null | undefined) {
 export function parseLegacyDate(value: string | null | undefined) {
   const input = (value ?? "").trim();
   if (!input) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) return undefined;
-  const date = new Date(`${input}T00:00:00.000Z`);
-  return Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== input ? undefined : date;
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(input);
+  if (!match) return undefined;
+  const normalized = `${match[1]}-${match[2]!.padStart(2, "0")}-${match[3]!.padStart(2, "0")}`;
+  const date = new Date(`${normalized}T00:00:00.000Z`);
+  return Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== normalized ? undefined : date;
 }
 
 export function parseLegacyChapters(raw: string | null | undefined) {
-  if (!(raw ?? "").trim()) return { classification: "PARSED CLEANLY" as const, rows: [] as ParsedChapter[], rejected: [] as string[] };
-  const rows: ParsedChapter[] = []; const rejected: string[] = [];
+  if (!(raw ?? "").trim()) return { classification: "PARSED CLEANLY" as const, rows: [] as ParsedChapter[], rejected: [] as string[], normalized: [] as Array<{ line: string; rule: string }> };
+  const rows: ParsedChapter[] = []; const rejected: string[] = []; const normalized: Array<{ line: string; rule: string }> = [];
   for (const sourceLine of raw!.split("\n")) {
     const line = sourceLine.replace(/\r$/, "").trim();
     if (!line) continue;
-    const match = /^(.*?)\s+(\d+);(\d{1,3}):(\d{2})$/.exec(line);
-    if (!match || Number(match[4]) > 59) { rejected.push(line); continue; }
+    const match = /^(.*?)\s+(\d+);\s*(\d+)\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?$/.exec(line);
+    const hasHours = match?.[5] !== undefined;
+    if (!match || Number(match[4]) > 59 || (hasHours && Number(match[5]) > 59)) { rejected.push(line); continue; }
     const separator = match[1]!.indexOf(" - ");
     if (separator < 1 || separator >= match[1]!.length - 3) { rejected.push(line); continue; }
-    rows.push({ position: rows.length, artist: match[1]!.slice(0, separator).trim(), title: match[1]!.slice(separator + 3).trim(), legacyReference: match[2]!, durationMs: (Number(match[3]) * 60 + Number(match[4])) * 1000 });
+    if (hasHours) normalized.push({ line, rule: "HOURS_MINUTES_SECONDS" });
+    else if (!/;\d+:\d{2}$/.test(line)) normalized.push({ line, rule: "TIMESTAMP_WHITESPACE" });
+    const durationMs = hasHours ? (Number(match[3]) * 3600 + Number(match[4]) * 60 + Number(match[5])) * 1000 : (Number(match[3]) * 60 + Number(match[4])) * 1000;
+    rows.push({ position: rows.length, artist: match[1]!.slice(0, separator).trim(), title: match[1]!.slice(separator + 3).trim(), legacyReference: match[2]!, durationMs });
   }
-  return { classification: rejected.length ? rows.length ? "PARSED WITH WARNING" as const : "UNPARSEABLE" as const : "PARSED CLEANLY" as const, rows, rejected };
+  return { classification: rejected.length ? rows.length ? "PARSED WITH WARNING" as const : "UNPARSEABLE" as const : "PARSED CLEANLY" as const, rows, rejected, normalized };
+}
+
+export function classifyRejectedChapterLine(line: string) {
+  if (!line.includes(";")) return "MISSING_SEMICOLON" as const;
+  if ((line.match(/;/g) ?? []).length > 1) return "EXTRA_SEMICOLON" as const;
+  if (!/;\s*\d+\s*:\s*\d{2}(?:\s*:\s*\d{2})?$/.test(line)) return "MALFORMED_DURATION" as const;
+  if (!/\s+\d+;/.test(line)) return "MISSING_ID_SEPARATOR" as const;
+  if (!line.includes(" - ")) return "MISSING_ARTIST_TITLE_SEPARATOR" as const;
+  return "OTHER" as const;
 }
 
 function safeEvidence(value: unknown) {
@@ -86,22 +101,36 @@ function checkUrlFields(issues: MigrationIssueInput[], table: string, row: RawRo
 function mediaCandidate(root: string, value: string | null | undefined) {
   if (!value) return null;
   const normalized = value.replaceAll("\\", "/").replace(/^https?:\/\/[^/]+\//i, "").replace(/^\/?assets\/uploads\/files\//, "").replace(/^\/+/, "");
-  if (!normalized || normalized.includes("..") || path.isAbsolute(normalized)) return null;
+  if (!normalized || normalized.split("/").includes("..") || path.isAbsolute(normalized)) return null;
   const target = path.resolve(root, normalized);
   return target.startsWith(`${path.resolve(root)}${path.sep}`) ? target : null;
 }
 
-export async function resolveArtworkSource(root: string, row: RawRow, fields: string[]) {
+export async function resolveArtworkSourceDetailed(root: string, row: RawRow, fields: string[]) {
   for (const field of fields) {
     const direct = mediaCandidate(root, row[field]);
     const basename = row[field] ? mediaCandidate(root, path.basename(row[field]!)) : null;
     for (const candidate of [direct, basename]) {
       if (!candidate) continue;
-      try { if ((await stat(candidate)).isFile()) return candidate; } catch { /* try next local candidate */ }
+      try { if ((await stat(candidate)).isFile()) return { path: candidate, rule: "EXACT_PATH" as const, requested: row[field] ?? null }; } catch { /* try next local candidate */ }
+    }
+  }
+  for (const field of fields) {
+    const requested = row[field]; const prefix = /^([a-f0-9]{5})-/i.exec(path.basename(requested ?? ""))?.[1];
+    if (!prefix) continue;
+    for (const relative of ["", "1440", "1024", "512", "thumbnails/256", "thumbnails/80"]) {
+      const directory = path.join(root, relative);
+      try {
+        const matches = (await readdir(directory, { withFileTypes: true })).filter((entry) => entry.isFile() && entry.name.toLowerCase().startsWith(`${prefix.toLowerCase()}-`));
+        if (matches.length === 1) return { path: path.join(directory, matches[0]!.name), rule: "UNIQUE_HASH_PREFIX" as const, requested: requested ?? null };
+        if (matches.length > 1) return null;
+      } catch { /* try next local directory */ }
     }
   }
   return null;
 }
+
+export async function resolveArtworkSource(root: string, row: RawRow, fields: string[]) { return (await resolveArtworkSourceDetailed(root, row, fields))?.path ?? null; }
 
 export async function analyzeCatalogue(sourceSha256: string, catalogue: LegacyCatalogue, mediaRoot: string): Promise<Analysis> {
   const issues: MigrationIssueInput[] = [];
@@ -113,7 +142,7 @@ export async function analyzeCatalogue(sourceSha256: string, catalogue: LegacyCa
     else { const key = name.normalize("NFKC").toLocaleLowerCase(); normalizedNames.set(key, [...(normalizedNames.get(key) ?? []), id ?? -1]); }
     if (row.priority != null && (!/^-?\d+$/.test(row.priority) || Math.abs(Number(row.priority)) > 10_000)) issue(issues, row, "artists", "priority", "WARNING", "Unusual Artist priority.", "Review before mapping priority in a later phase.", row.priority);
     checkUrlFields(issues, "artists", row, ["facebook_url"]);
-    if (row.image && !await resolveArtworkSource(mediaRoot, row, ["image"])) issue(issues, row, "artists", "image", "WARNING", "Artist artwork does not resolve in the local FTP snapshot.", "Import Artist without artwork and reconcile locally.", row.image);
+    if (row.image) { const artwork = await resolveArtworkSourceDetailed(mediaRoot, row, ["image"]); if (!artwork) issue(issues, row, "artists", "image", "INFORMATIONAL", "Optional Artist artwork does not resolve in the local FTP snapshot.", "Import Artist without artwork; no publication action is required.", row.image); else if (artwork.rule !== "EXACT_PATH") issue(issues, row, "artists", "image", "INFORMATIONAL", "RECOVERED_ARTWORK_FILENAME", "Use the unique local hash-prefix match and retain the recovery rule in the manifest.", `${artwork.requested} -> ${path.basename(artwork.path)}`); }
   }
   for (const [name, ids] of normalizedNames) if (ids.length > 1) for (const id of ids) issue(issues, { id: String(id) }, "artists", "name", "WARNING", "Duplicate normalized Artist name.", "Preserve both legacy IDs and review merge policy.", `${name} (${ids.join(",")})`);
 
@@ -125,17 +154,24 @@ export async function analyzeCatalogue(sourceSha256: string, catalogue: LegacyCa
     const id = integer(row.id); if (!id) issue(issues, row, "tracks", "id", "BLOCKER", "Invalid shared Track/Podcast ID.", "Exclude until reconciled.", row.id); else trackIds.add(id);
     if (!['track', 'podcast'].includes(row.type ?? "")) issue(issues, row, "tracks", "type", "BLOCKER", "Unknown Track type.", "Add an explicit approved mapping.", row.type);
     if (!row.title?.trim()) issue(issues, row, "tracks", "title", "BLOCKER", "Blank title.", "Reconcile source title.");
-    for (const field of ["artist_id", "secondary_artist_id"]) { const value = row[field]; if (value && (!integer(value) || !artistIds.has(integer(value)!))) issue(issues, row, "tracks", field, field === "artist_id" ? "BLOCKER" : "WARNING", "Referenced Artist is missing.", "Reconcile the reference; do not create a fake Artist.", value); }
+    const primaryArtistId = integer(row.artist_id); const secondaryValue = row.secondary_artist_id?.trim(); const secondaryArtistId = integer(secondaryValue);
+    if (!primaryArtistId || !artistIds.has(primaryArtistId)) issue(issues, row, "tracks", "artist_id", "BLOCKER", "Referenced Artist is missing.", "Reconcile the required reference; do not create a fake Artist.", row.artist_id);
+    if (secondaryValue === "0") issue(issues, row, "tracks", "secondary_artist_id", "INFORMATIONAL", "LEGACY_ZERO_SECONDARY_ARTIST", "Normalize the legacy zero sentinel to null.", secondaryValue);
+    else if (secondaryValue && (!secondaryArtistId || !artistIds.has(secondaryArtistId))) issue(issues, row, "tracks", "secondary_artist_id", "WARNING", "Optional secondary Artist reference is invalid.", "Normalize to null and review the credit if needed.", secondaryValue);
     if (integer(row.artist_id) && integer(row.artist_id) === integer(row.secondary_artist_id)) issue(issues, row, "tracks", "secondary_artist_id", "COMPATIBILITY", "Secondary Artist duplicates the primary Artist.", "Omit the redundant secondary reference canonically.", row.secondary_artist_id);
     if (!mapLabel(row.label)) issue(issues, row, "tracks", "label", "BLOCKER", "Unknown Label.", "Approve an explicit canonical mapping.", row.label);
     if (parseLegacyDuration(row.duration) === undefined) issue(issues, row, "tracks", "duration", "WARNING", "Malformed duration.", "Preserve null canonically and review source value.", row.duration);
-    if (parseLegacyDate(row.date) === undefined) issue(issues, row, "tracks", "date", row.type === "podcast" ? "BLOCKER" : "WARNING", "Malformed date.", "Review before production migration.", row.date);
+    const parsedDate = parseLegacyDate(row.date); if (parsedDate === undefined) issue(issues, row, "tracks", "date", row.type === "podcast" ? "BLOCKER" : "WARNING", "Malformed date.", "Review before production migration.", row.date);
+    else if (parsedDate instanceof Date && row.date?.trim() !== parsedDate.toISOString().slice(0, 10)) issue(issues, row, "tracks", "date", "INFORMATIONAL", "NORMALIZED_LEGACY_DATE", "Use the validated zero-padded ISO calendar date.", `${row.date} -> ${parsedDate.toISOString().slice(0, 10)}`);
     checkUrlFields(issues, "tracks", row, ["itunes_link", "beatport_link", "web_link", "traxsource_link", "spotify_link", "soundcloud_link", "podcast_link"]);
-    if (!await resolveArtworkSource(mediaRoot, row, ["cover_download", "cover_high", "cover_low", "cover_thumbnail_high", "cover_thumbnail_low"])) issue(issues, row, "tracks", "cover_download", row.type === "podcast" ? "BLOCKER" : "WARNING", "No usable local artwork reference resolved.", "Reconcile artwork from the local snapshot.", row.cover_download);
+    const artwork = await resolveArtworkSourceDetailed(mediaRoot, row, ["cover_download", "cover_high", "cover_low", "cover_thumbnail_high", "cover_thumbnail_low"]);
+    if (!artwork) issue(issues, row, "tracks", "cover_download", row.type === "podcast" ? "BLOCKER" : "INFORMATIONAL", row.type === "podcast" ? "No usable local Podcast artwork resolved." : "Optional Track artwork is absent.", row.type === "podcast" ? "Reconcile artwork before publication." : "Import without Track artwork; no publication action is required.", row.cover_download);
+    else if (artwork.rule !== "EXACT_PATH") issue(issues, row, "tracks", "cover_download", "INFORMATIONAL", "RECOVERED_ARTWORK_FILENAME", "Use the unique local hash-prefix match and retain the recovery rule in the manifest.", `${artwork.requested} -> ${path.basename(artwork.path)}`);
     if (!row.file_id?.trim()) issue(issues, row, "tracks", "file_id", row.type === "podcast" ? "BLOCKER" : "WARNING", "Missing historical audio ID.", "Reconcile before production migration.");
     else issue(issues, row, "tracks", "file_id", "INFORMATIONAL", "Audio binary is unresolved because S3 access is prohibited.", "Preserve exact ID as a LEGACY_EXTERNAL reference and materialize later.", row.file_id);
     if (row.type === "podcast" && id) {
       const parsed = parseLegacyChapters(row.artist_feature_times); chapters.set(id, parsed);
+      for (const normalized of parsed.normalized) issue(issues, row, "tracks", "artist_feature_times", "INFORMATIONAL", `NORMALIZED_LEGACY_CHAPTER_${normalized.rule}`, "Preserve chapter text and normalize only the unambiguous timestamp form.", normalized.line);
       for (const rejected of parsed.rejected) issue(issues, row, "tracks", "artist_feature_times", "WARNING", "Podcast chapter line is unparseable and was not forced into canonical chapters.", "Review raw source evidence during cleanup.", rejected);
     }
   }
@@ -143,12 +179,18 @@ export async function analyzeCatalogue(sourceSha256: string, catalogue: LegacyCa
   for (const row of catalogue.releases) {
     const id = integer(row.id); if (!id) issue(issues, row, "releases", "id", "BLOCKER", "Invalid Release ID.", "Exclude until reconciled.", row.id); else releaseIds.add(id);
     if (!row.title?.trim()) issue(issues, row, "releases", "title", "BLOCKER", "Blank Release title.", "Reconcile source title.");
-    for (const field of ["artist_id", "secondary_artist_id"]) { const value = row[field]; if (value && (!integer(value) || !artistIds.has(integer(value)!))) issue(issues, row, "releases", field, field === "artist_id" ? "BLOCKER" : "WARNING", "Referenced Artist is missing.", "Reconcile reference without fabricating an Artist.", value); }
+    const primaryArtistId = integer(row.artist_id); const secondaryValue = row.secondary_artist_id?.trim(); const secondaryArtistId = integer(secondaryValue);
+    if (!primaryArtistId || !artistIds.has(primaryArtistId)) issue(issues, row, "releases", "artist_id", "BLOCKER", "Referenced Artist is missing.", "Reconcile the required reference without fabricating an Artist.", row.artist_id);
+    if (secondaryValue === "0") issue(issues, row, "releases", "secondary_artist_id", "INFORMATIONAL", "LEGACY_ZERO_SECONDARY_ARTIST", "Normalize the legacy zero sentinel to null.", secondaryValue);
+    else if (secondaryValue && (!secondaryArtistId || !artistIds.has(secondaryArtistId))) issue(issues, row, "releases", "secondary_artist_id", "WARNING", "Optional secondary Artist reference is invalid.", "Normalize to null and review the credit if needed.", secondaryValue);
     if (integer(row.artist_id) && integer(row.artist_id) === integer(row.secondary_artist_id)) issue(issues, row, "releases", "secondary_artist_id", "COMPATIBILITY", "Secondary Artist duplicates the primary Artist.", "Omit the redundant secondary reference canonically.", row.secondary_artist_id);
     if (!mapLabel(row.label)) issue(issues, row, "releases", "label", "BLOCKER", "Unknown Label.", "Approve an explicit canonical mapping.", row.label);
-    if (!(parseLegacyDate(row.date) instanceof Date)) issue(issues, row, "releases", "date", "BLOCKER", "Missing or malformed Release date.", "Reconcile the date before publication.", row.date);
+    const parsedDate = parseLegacyDate(row.date); if (!(parsedDate instanceof Date)) issue(issues, row, "releases", "date", "BLOCKER", "Missing or malformed Release date.", "Reconcile the date before publication.", row.date);
+    else if (row.date?.trim() !== parsedDate.toISOString().slice(0, 10)) issue(issues, row, "releases", "date", "INFORMATIONAL", "NORMALIZED_LEGACY_DATE", "Use the validated zero-padded ISO calendar date.", `${row.date} -> ${parsedDate.toISOString().slice(0, 10)}`);
     checkUrlFields(issues, "releases", row, ["itunes_link", "beatport_link", "web_link", "traxsource_link", "spotify_link", "soundcloud_link"]);
-    if (!await resolveArtworkSource(mediaRoot, row, ["cover_download", "cover_high", "cover_low", "cover_thumbnail_high", "cover_thumbnail_low"])) issue(issues, row, "releases", "cover_download", "BLOCKER", "No usable local Release artwork resolved.", "Reconcile artwork from the local snapshot.", row.cover_download);
+    const artwork = await resolveArtworkSourceDetailed(mediaRoot, row, ["cover_download", "cover_high", "cover_low", "cover_thumbnail_high", "cover_thumbnail_low"]);
+    if (!artwork) issue(issues, row, "releases", "cover_download", "BLOCKER", "No usable local Release artwork resolved.", "Reconcile artwork from the local snapshot.", row.cover_download);
+    else if (artwork.rule !== "EXACT_PATH") issue(issues, row, "releases", "cover_download", "INFORMATIONAL", "RECOVERED_ARTWORK_FILENAME", "Use the unique local hash-prefix match and retain the recovery rule in the manifest.", `${artwork.requested} -> ${path.basename(artwork.path)}`);
   }
 
   const positions = new Map<number, number[]>(); const relationKeys = new Set<string>();

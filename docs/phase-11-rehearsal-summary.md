@@ -16,7 +16,7 @@ Additional imported rows:
 
 - 4,302 PodcastChapter rows
 - 1,155 locally regenerated IMAGE MediaAssets, each with six canonical variants
-- 2,176 unique LEGACY_EXTERNAL AUDIO references preserving all 2,184 row-level file IDs (eight IDs are shared)
+- 2,176 unique LEGACY_EXTERNAL AUDIO references for the 2,183 imported rows (seven file IDs are shared; one blocked Podcast identity was not yet represented)
 - 3,170 initial publication revisions
 - 3,418 frozen ReleaseRevisionTrack rows
 

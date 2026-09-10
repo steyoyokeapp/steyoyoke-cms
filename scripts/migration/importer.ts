@@ -1,13 +1,14 @@
 import path from "node:path";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import type { Prisma, PrismaClient } from "../../src/generated/prisma/client";
-import { analyzeCatalogue, integer, mapLabel, normalizeLegacyUrl, parseLegacyDate, parseLegacyDuration, resolveArtworkSource } from "./analysis";
+import { analyzeCatalogue, classifyRejectedChapterLine, integer, mapLabel, normalizeLegacyUrl, parseLegacyDate, parseLegacyDuration, resolveArtworkSource } from "./analysis";
 import { applyMigrations, migrationClient, resetRehearsalDatabase } from "./database";
 import { stableUuid, migrationSlug } from "./identity";
 import { loadLegacySnapshot } from "./legacy-dump";
 import { RehearsalMediaImporter } from "./media";
 import { LEGACY_MEDIA_ROOT, LEGACY_SNAPSHOT, REHEARSAL_OUTPUT_ROOT, REHEARSAL_REPORT_PATH, REHEARSAL_STORAGE_ROOT, rehearsalDatabaseUrl } from "./config";
 import type { Analysis, MigrationIssueInput, RawRow } from "./types";
+import { NORMALIZATION_RULES_VERSION } from "./policy";
 
 const ACTOR_ID = "00000000-0000-4000-8000-000000000011";
 const LABELS = [
@@ -150,7 +151,9 @@ export async function runRehearsal() {
     const media = new RehearsalMediaImporter(db, REHEARSAL_STORAGE_ROOT, ACTOR_ID); const artwork = await importArtwork(media, analysis, issues);
     const artistResult = await importArtists(db, analysis, artwork); const contentResult = await importTracksAndPodcasts(db, analysis, artwork, media); const releaseResult = await importReleases(db, analysis, artwork, issues); const sequences = await setSequences(db, analysis);
     const severity = Object.fromEntries(["BLOCKER", "WARNING", "COMPATIBILITY", "INFORMATIONAL"].map((level) => [level, issues.filter((candidate) => candidate.severity === level).length]));
-    const summary = { source: analysis.counts, initialEmptyCounts: empty, imported: { artists: artistResult.imported, tracks: contentResult.tracks, podcasts: contentResult.podcasts, releases: releaseResult.releases, releaseTracks: releaseResult.releaseTracks, podcastChapters: contentResult.chapters, imageAssets: media.imageCount, historicalAudioReferences: media.audioCount, revisions: artistResult.revisions + contentResult.revisions + releaseResult.revisions, releaseRevisionTracks: releaseResult.revisionTracks }, blocked: { artists: analysis.counts.artists - artistResult.imported, tracks: analysis.counts.tracks - contentResult.tracks, podcasts: analysis.counts.podcasts - contentResult.podcasts, releases: analysis.counts.releases - releaseResult.releases, releaseTracks: analysis.counts.releaseTracks - releaseResult.releaseTracks }, severity, labels: analysis.labels, sequences, sourceSha256: loaded.sourceSha256 };
+    const rejectedChapterLines = [...analysis.chapters.values()].flatMap((chapter) => chapter.rejected);
+    const chapterReview = Object.fromEntries([...new Set(rejectedChapterLines.map(classifyRejectedChapterLine))].sort().map((classification) => [classification, rejectedChapterLines.filter((line) => classifyRejectedChapterLine(line) === classification).length]));
+    const summary = { source: analysis.counts, initialEmptyCounts: empty, imported: { artists: artistResult.imported, tracks: contentResult.tracks, podcasts: contentResult.podcasts, releases: releaseResult.releases, releaseTracks: releaseResult.releaseTracks, podcastChapters: contentResult.chapters, imageAssets: media.imageCount, historicalAudioReferences: media.audioCount, revisions: artistResult.revisions + contentResult.revisions + releaseResult.revisions, releaseRevisionTracks: releaseResult.revisionTracks }, blocked: { artists: analysis.counts.artists - artistResult.imported, tracks: analysis.counts.tracks - contentResult.tracks, podcasts: analysis.counts.podcasts - contentResult.podcasts, releases: analysis.counts.releases - releaseResult.releases, releaseTracks: analysis.counts.releaseTracks - releaseResult.releaseTracks }, severity, labels: analysis.labels, sequences, chapterReview, normalizationRulesVersion: NORMALIZATION_RULES_VERSION, sourceSha256: loaded.sourceSha256 };
     for (let index = 0; index < issues.length; index += 500) await db.migrationIssue.createMany({ data: issues.slice(index, index + 500).map((candidate, offset) => ({ id: stableUuid("migration-issue", `${index + offset}:${candidate.sourceTable}:${candidate.sourceLegacyId}:${candidate.field}:${candidate.problem}`), runId, ...candidate })) });
     await db.migrationRun.update({ where: { id: runId }, data: { completedAt: new Date(), summary: summary as Prisma.InputJsonValue } });
     await writeFile(REHEARSAL_REPORT_PATH, JSON.stringify({ generatedAt: new Date().toISOString(), summary, issues }, null, 2), { mode: 0o600 });

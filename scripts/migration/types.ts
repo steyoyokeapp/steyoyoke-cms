@@ -32,7 +32,6 @@ export type Analysis = {
   catalogue: LegacyCatalogue;
   issues: MigrationIssueInput[];
   labels: Array<{ legacyValue: string; count: number; canonicalValue: string | null }>;
-  chapters: Map<number, { classification: "PARSED CLEANLY" | "PARSED WITH WARNING" | "UNPARSEABLE"; rows: ParsedChapter[] }>;
+  chapters: Map<number, { classification: "PARSED CLEANLY" | "PARSED WITH WARNING" | "UNPARSEABLE"; rows: ParsedChapter[]; rejected: string[]; normalized: Array<{ line: string; rule: string }> }>;
   counts: { artists: number; tracks: number; podcasts: number; releases: number; releaseTracks: number };
 };
-
