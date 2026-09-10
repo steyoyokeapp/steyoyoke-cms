@@ -13,7 +13,7 @@
 html { min-height: 100%; background: var(--paper); }
 body { margin: 0; min-height: 100%; color: var(--ink); background: var(--paper); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 a { color: inherit; text-decoration: none; }
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: 8px; font-size: clamp(2.2rem, 5vw, 4.6rem); line-height: .96; letter-spacing: -.055em; font-weight: 670; }
@@ -30,6 +30,8 @@ h2 { margin-bottom: 8px; font-size: 1.18rem; letter-spacing: -.02em; }
 .topbar { min-height: 76px; padding: 0 clamp(22px, 5vw, 72px); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: rgba(243,240,233,.9); backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 10; }
 .brand { display: flex; align-items: center; gap: 12px; font-size: .73rem; letter-spacing: .14em; font-weight: 800; }
 .brand > span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: var(--accent); letter-spacing: 0; }
+.brand-nav, .brand-nav nav { display: flex; align-items: center; gap: 26px; }
+.brand-nav nav { gap: 16px; font-size: .78rem; font-weight: 650; }
 .user-menu { display: flex; align-items: center; gap: 20px; }
 .user-menu > span { display: flex; flex-direction: column; text-align: right; font-size: .8rem; }
 .user-menu small { color: var(--muted); font-size: .65rem; letter-spacing: .1em; }
@@ -60,8 +62,8 @@ a.table-row:hover { background: #f7f4ed; }
 
 label { display: grid; gap: 8px; margin-bottom: 23px; font-size: .76rem; font-weight: 700; letter-spacing: .025em; }
 .hint { color: var(--muted); font-weight: 400; }
-input, textarea { width: 100%; padding: 12px 13px; border: 1px solid #cfc8bc; border-radius: 2px; outline: none; background: #fff; color: var(--ink); }
-input:focus, textarea:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(200,255,26,.45); }
+input, textarea, select { width: 100%; padding: 12px 13px; border: 1px solid #cfc8bc; border-radius: 2px; outline: none; background: #fff; color: var(--ink); }
+input:focus, textarea:focus, select:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(200,255,26,.45); }
 input:read-only, textarea:read-only { color: #625f5b; background: #f2efe8; }
 textarea { resize: vertical; line-height: 1.55; }
 .editor-form { padding: 32px; }
@@ -95,15 +97,26 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
 .history-row { display: grid; grid-template-columns: 90px minmax(120px, 1fr) 100px auto; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: .75rem; }
 .history-row strong { color: var(--ink); }
 .history-row time { text-align: right; }
+.section-break { margin-top: 38px; }
+.media-placeholder { padding: 28px 32px; box-shadow: none; }
+.change-indicator { padding: 10px 14px; border: 1px solid var(--line); font-size: .76rem; font-weight: 750; }
+.change-indicator.changed { background: #ffe4aa; }
+.change-indicator.synced { background: #dcf7a2; }
+.filter-bar { display: grid; grid-template-columns: 2fr repeat(3, 1fr) auto; gap: 10px; padding: 16px; margin-bottom: 18px; }
+.track-table .table-row { grid-template-columns: 1.4fr 1fr .9fr .55fr .65fr .8fr .8fr .9fr; font-size: .78rem; }
 
 @media (max-width: 900px) {
   .editor-grid { grid-template-columns: 1fr; }
+  .filter-bar { grid-template-columns: 1fr 1fr; }
+  .track-table { overflow-x: auto; }
+  .track-table .table-row { min-width: 1050px; }
   .table-row { grid-template-columns: 1.6fr .6fr .8fr; }
   .table-row span:nth-child(4), .table-row span:nth-child(5) { display: none; }
 }
 @media (max-width: 600px) {
   .topbar { min-height: 66px; }
   .user-menu > span { display: none; }
+  .brand-nav nav { display: none; }
   .workspace { padding-top: 30px; }
   .page-heading { min-height: 155px; align-items: flex-end; }
   .summary-strip { grid-template-columns: repeat(2, 1fr); gap: 18px; }

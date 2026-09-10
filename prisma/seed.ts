@@ -20,7 +20,20 @@ const users: Array<{ name: string; email: string; password: string; role: Role }
   { name: "Local Viewer", email: seedEnv.SEED_VIEWER_EMAIL, password: seedEnv.SEED_VIEWER_PASSWORD, role: "VIEWER" },
 ];
 
+const labels = [
+  { id: "00000000-0000-4000-8000-000000000101", name: "Steyoyoke", slug: "steyoyoke", legacyValue: "STEYOYOKE" },
+  { id: "00000000-0000-4000-8000-000000000102", name: "Steyoyoke Black", slug: "steyoyoke-black", legacyValue: "STEYOYOKE_BLACK" },
+  { id: "00000000-0000-4000-8000-000000000103", name: "Inner Symphony", slug: "inner-symphony", legacyValue: "INNER_SYMPHONY" },
+] as const;
+
 try {
+  for (const label of labels) {
+    await prisma.label.upsert({
+      where: { legacyValue: label.legacyValue },
+      create: { ...label, active: true },
+      update: { name: label.name, slug: label.slug, active: true },
+    });
+  }
   for (const candidate of users) {
     const existing = await prisma.user.findUnique({ where: { email: candidate.email } });
     const userId = existing?.id ?? (await seedAuth.api.signUpEmail({
@@ -35,7 +48,7 @@ try {
       data: { role: candidate.role, emailVerified: true, name: candidate.name },
     });
   }
-  console.log("Seeded local ADMIN, EDITOR, and VIEWER accounts. Passwords were not printed.");
+  console.log("Seeded labels and local ADMIN, EDITOR, and VIEWER accounts. Passwords were not printed.");
 } finally {
   await prisma.$disconnect();
 }

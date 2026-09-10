@@ -28,7 +28,7 @@ export function legacyArtistEnvelope(artists: LegacySource[]) {
   };
 }
 
-function isAuthorized(request: Request): boolean {
+export function isLegacyAuthorized(request: Request): boolean {
   const token = request.headers.get("x-csrf-token");
   if (!token) return false;
   const digest = (value: string) => createHash("sha256").update(value).digest();
@@ -37,7 +37,7 @@ function isAuthorized(request: Request): boolean {
     .some((expected) => timingSafeEqual(presented, digest(expected)));
 }
 
-function unauthorized() {
+export function legacyUnauthorized() {
   return new Response("<!doctype html><html><head><title>Unauthorized</title></head><body><h1>Unauthorized</h1></body></html>", {
     status: 401,
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
@@ -45,7 +45,7 @@ function unauthorized() {
 }
 
 export async function handleLegacyArtistRequest(request: Request, legacyId?: number) {
-  if (!isAuthorized(request)) return unauthorized();
+  if (!isLegacyAuthorized(request)) return legacyUnauthorized();
   if (new URL(request.url).searchParams.get("filter") !== "artists") {
     return Response.json({ error: "Unsupported filter." }, { status: 400 });
   }

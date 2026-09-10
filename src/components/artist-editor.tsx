@@ -20,6 +20,7 @@ async function readResult(response: Response) {
   if (!response.ok) throw new Error(result.error?.message ?? "The operation failed.");
   return result;
 }
+const displayDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
 
 export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role: string }) {
   const router = useRouter();
@@ -107,20 +108,20 @@ export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role:
           <div className="button-row wrap">
             {artist.status !== "ARCHIVED" && <button className="button" disabled={pending} onClick={() => perform("publish", { expectedWorkingVersion: artist.workingVersion })}>Publish now</button>}
             {artist.status === "PUBLISHED" && <button className="button" disabled={pending} onClick={() => perform("unpublish")}>Unpublish</button>}
-            {artist.status !== "ARCHIVED" && artist.status !== "SCHEDULED" && <><input aria-label="Schedule time" type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} /><button className="button" disabled={pending || !scheduledFor} onClick={() => perform("schedule", { scheduledFor: new Date(scheduledFor).toISOString(), expectedWorkingVersion: artist.workingVersion })}>Schedule</button></>}
+            {artist.status !== "ARCHIVED" && artist.status !== "SCHEDULED" && <><input aria-label="Schedule time" type="datetime-local" value={scheduledFor} onInput={(event) => setScheduledFor(event.currentTarget.value)} /><button className="button" disabled={pending || !scheduledFor} onClick={() => perform("schedule", { scheduledFor: new Date(scheduledFor).toISOString(), expectedWorkingVersion: artist.workingVersion })}>Schedule</button></>}
             {artist.status === "SCHEDULED" && <button className="button" disabled={pending} onClick={() => perform("cancelSchedule")}>Cancel schedule</button>}
             {artist.status === "ARCHIVED" ? <button className="button" disabled={pending} onClick={() => perform("restore")}>Restore</button> : <button className="button danger" disabled={pending} onClick={() => perform("archive")}>Archive</button>}
             {isAdmin && artist.status === "DRAFT" && artist.revisions.length === 0 && <button className="button danger" disabled={pending} onClick={() => confirm("Permanently delete this never-published draft?") && perform("hardDelete")}>Delete permanently</button>}
           </div>
-          {artist.scheduledFor && <p className="schedule-note">Scheduled for {new Date(artist.scheduledFor).toLocaleString()} (stored as UTC).</p>}
+          {artist.scheduledFor && <p className="schedule-note">Scheduled for {displayDate(artist.scheduledFor)} UTC.</p>}
         </section>}
       </div>
       <aside className="preview-column">
         <section className="panel preview"><div className="eyebrow">Canonical preview</div><h2>{name || "Untitled artist"}</h2><p>{shortBio || "No biography yet."}</p><dl><dt>Slug</dt><dd>/{slug}</dd><dt>Facebook</dt><dd>{facebookUrl || "—"}</dd></dl><pre>{JSON.stringify(canonicalPreview, null, 2)}</pre></section>
         <section className="panel preview"><div className="eyebrow">Legacy preview</div><h2>Compatibility JSON</h2>{legacyPreview ? <pre data-testid="legacy-preview">{JSON.stringify(legacyPreview, null, 2)}</pre> : <p className="empty-inline">Not visible to legacy clients until published.</p>}</section>
       </aside>
-      <section className="panel history-panel"><h2>Revision history</h2>{artist.revisions.length === 0 ? <p className="muted">No frozen revisions yet.</p> : artist.revisions.map((revision) => <div className="history-row" key={revision.id}><strong>r{revision.revisionNumber}</strong><span>{revision.name}</span><span>from v{revision.sourceWorkingVersion}</span><time>{new Date(revision.createdAt).toLocaleString()}</time></div>)}</section>
-      <section className="panel history-panel"><h2>Audit trail</h2>{artist.auditLogs.map((log) => <div className="history-row" key={log.id}><strong>{log.action}</strong><span>{log.actor?.name ?? "Scheduler"}</span><time>{new Date(log.createdAt).toLocaleString()}</time></div>)}</section>
+      <section className="panel history-panel"><h2>Revision history</h2>{artist.revisions.length === 0 ? <p className="muted">No frozen revisions yet.</p> : artist.revisions.map((revision) => <div className="history-row" key={revision.id}><strong>r{revision.revisionNumber}</strong><span>{revision.name}</span><span>from v{revision.sourceWorkingVersion}</span><time>{displayDate(revision.createdAt)} UTC</time></div>)}</section>
+      <section className="panel history-panel"><h2>Audit trail</h2>{artist.auditLogs.map((log) => <div className="history-row" key={log.id}><strong>{log.action}</strong><span>{log.actor?.name ?? "Scheduler"}</span><time>{displayDate(log.createdAt)} UTC</time></div>)}</section>
     </div>
   );
 }

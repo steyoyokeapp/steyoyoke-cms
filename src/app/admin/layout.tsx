@@ -10,7 +10,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <Link href="/admin/artists" className="brand"><span>SY</span> STEYOYOKE CMS</Link>
+        <div className="brand-nav"><Link href="/admin/artists" className="brand"><span>SY</span> STEYOYOKE CMS</Link><nav><Link href="/admin/artists">Artists</Link><Link href="/admin/tracks">Tracks</Link></nav></div>
         <UserMenu name={session.user.name} role={String(session.user.role)} />
       </header>
       <main className="workspace">{children}</main>
