@@ -40,6 +40,7 @@ yarn-error.log*
 /test-results
 /src/generated/prisma
 /.local-storage
+/.migration-rehearsal
 
 # vercel
 .vercel

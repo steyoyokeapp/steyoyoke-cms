@@ -16,7 +16,11 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "publish:scheduled": "tsx src/server/run-scheduled-artists.ts"
+    "publish:scheduled": "tsx src/server/run-scheduled-artists.ts",
+    "migration:analyze": "tsx scripts/migration/cli.ts analyze",
+    "migration:rehearse": "tsx scripts/migration/cli.ts rehearse-import",
+    "migration:compare": "tsx scripts/migration/cli.ts compare",
+    "migration:report": "tsx scripts/migration/cli.ts report"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.7.3",

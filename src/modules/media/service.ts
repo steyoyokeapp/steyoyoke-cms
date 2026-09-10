@@ -148,7 +148,7 @@ export async function purgeEligibleMedia(actor: Actor, now = new Date(), storage
   const candidates = await prisma.mediaAsset.findMany({ where: { unreferencedAt: { lte: cutoff } }, include: { variants: true } }); let purged = 0;
   for (const candidate of candidates) {
     if ((await referenceRows(prisma, candidate.id)).length) { await reconcileMediaReference(prisma, candidate.id, now); continue; }
-    await Promise.all([storage.delete(candidate.sourceStorageKey), ...candidate.variants.map((variant) => storage.delete(variant.storageKey))]);
+    await Promise.all([...(candidate.sourceStorageKey ? [storage.delete(candidate.sourceStorageKey)] : []), ...candidate.variants.map((variant) => storage.delete(variant.storageKey))]);
     await prisma.$transaction(async (tx) => { await tx.mediaAuditLog.create({ data: { mediaAssetId: candidate.id, actorId: actor.userId, action: "MEDIA_PURGE", metadata: { mediaAssetId: candidate.id, compatibilityFilename: candidate.compatibilityFilename } } }); await tx.mediaAsset.update({ where: { id: candidate.id }, data: { status: "RETIRED", retiredAt: now } }); await tx.mediaVariant.deleteMany({ where: { mediaAssetId: candidate.id } }); await tx.mediaAsset.delete({ where: { id: candidate.id } }); }); purged += 1;
   }
   return { examined: candidates.length, purged };

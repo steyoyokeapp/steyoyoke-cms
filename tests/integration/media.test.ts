@@ -49,7 +49,7 @@ describe("media service and frozen artwork references", () => {
     expect(response.status).toBe(200); expect(response.headers.get("content-type")).toBe("image/jpeg"); expect(response.headers.get("cache-control")).toContain("immutable"); expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
     expect((await getLegacyMedia(new Request("http://local/assets/uploads/files/../secret"), { params: Promise.resolve({ path: ["..", "secret"] }) } as never)).status).toBe(404);
     expect((await getLegacyMedia(new Request(`http://local/assets/uploads/files/unknown/${asset.compatibilityFilename}`), { params: Promise.resolve({ path: ["unknown", asset.compatibilityFilename] }) } as never)).status).toBe(404);
-    await Promise.all([localStorage.delete(asset.sourceStorageKey), ...asset.variants.map(({ storageKey }) => localStorage.delete(storageKey))]);
+    await Promise.all([localStorage.delete(asset.sourceStorageKey!), ...asset.variants.map(({ storageKey }) => localStorage.delete(storageKey))]);
   });
 
   it("freezes Artist, Track, Podcast, and Release artwork independently from working drafts", async () => {

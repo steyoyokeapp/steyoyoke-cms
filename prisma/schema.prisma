@@ -53,6 +53,19 @@ enum MediaStatus {
   FAILED
   QUARANTINED
   RETIRED
+  EXTERNAL
+}
+
+enum MediaProvider {
+  LOCAL
+  LEGACY_EXTERNAL
+}
+
+enum MigrationIssueSeverity {
+  BLOCKER
+  WARNING
+  COMPATIBILITY
+  INFORMATIONAL
 }
 
 enum MediaVariantKey {
@@ -636,14 +649,14 @@ model MediaAsset {
   id                     String                   @id @default(uuid()) @db.Uuid
   kind                   MediaKind                @default(IMAGE)
   status                 MediaStatus              @default(UPLOADING)
-  provider               String                   @default("LOCAL")
-  sourceStorageKey       String                   @unique
+  provider               MediaProvider            @default(LOCAL)
+  sourceStorageKey       String?                  @unique
   compatibilityFilename  String?                  @unique
   legacyAudioId          String?                  @unique
-  originalFilename       String
-  mimeType               String
-  byteSize               Int
-  sha256Checksum         String
+  originalFilename       String?
+  mimeType               String?
+  byteSize               Int?
+  sha256Checksum         String?
   width                  Int?
   height                 Int?
   durationMs             Int?
@@ -673,6 +686,36 @@ model MediaAsset {
   @@index([unreferencedAt])
   @@index([createdById])
   @@map("media_assets")
+}
+
+model MigrationRun {
+  id           String           @id @default(uuid()) @db.Uuid
+  sourceSha256 String
+  startedAt    DateTime         @default(now()) @db.Timestamptz(6)
+  completedAt  DateTime?        @db.Timestamptz(6)
+  summary      Json?
+  issues       MigrationIssue[]
+
+  @@index([sourceSha256])
+  @@map("migration_runs")
+}
+
+model MigrationIssue {
+  id             String                 @id @default(uuid()) @db.Uuid
+  runId          String                 @db.Uuid
+  sourceTable    String
+  sourceLegacyId Int?
+  field          String
+  severity       MigrationIssueSeverity
+  problem        String
+  evidence       String?
+  proposedAction String
+  createdAt      DateTime               @default(now()) @db.Timestamptz(6)
+  run            MigrationRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, severity])
+  @@index([sourceTable, sourceLegacyId])
+  @@map("migration_issues")
 }
 
 model MediaVariant {
