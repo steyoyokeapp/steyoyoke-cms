@@ -99,6 +99,17 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
 .history-row time { text-align: right; }
 .section-break { margin-top: 38px; }
 .media-placeholder { padding: 28px 32px; box-shadow: none; }
+.media-picker { padding: 28px 32px; box-shadow: none; }
+.media-picker > label { margin-top: 18px; }
+.media-preview { display: flex; align-items: center; gap: 16px; margin: 18px 0; }
+.media-preview img { width: 96px; height: 96px; object-fit: contain; background: #eeeae1; }
+.media-preview span { display: grid; gap: 5px; }
+.media-preview small { color: var(--muted); }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+.media-card { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); background: #f8f5ee; text-align: left; cursor: pointer; }
+.media-card img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #eeeae1; }
+.media-card small { color: var(--muted); overflow-wrap: anywhere; }
+.detail-artwork { width: 100%; max-height: 380px; object-fit: contain; background: #eeeae1; }
 .change-indicator { padding: 10px 14px; border: 1px solid var(--line); font-size: .76rem; font-weight: 750; }
 .change-indicator.changed { background: #ffe4aa; }
 .change-indicator.synced { background: #dcf7a2; }

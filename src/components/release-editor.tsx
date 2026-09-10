@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type DragEvent, type FormEvent } from "react";
+import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
 
 type Revision = { id: string; revisionNumber: number; sourceWorkingVersion: number; title: string; createdAt: string; trackCount: number };
 type Audit = { id: string; action: string; createdAt: string; actor: { name: string } | null };
@@ -10,17 +11,18 @@ export type ReleaseLabelOption = { id: string; name: string; active?: boolean };
 export type ReleaseEditorData = {
   id: string; legacyId: number; title: string; primaryArtistId: string; secondaryArtistId: string | null; labelId: string; releaseDate: string | null;
   spotifyUrl: string | null; beatportUrl: string | null; traxsourceUrl: string | null; bandcampUrl: string | null; appleMusicUrl: string | null; soundcloudUrl: string | null;
-  status: string; workingVersion: number; scheduledFor: string | null; publishedRevision: Revision | null; scheduledRevision: Revision | null; revisions: Revision[]; auditLogs: Audit[];
+  artworkAssetId: string | null; status: string; workingVersion: number; scheduledFor: string | null; publishedRevision: Revision | null; scheduledRevision: Revision | null; revisions: Revision[]; auditLogs: Audit[];
   trackIds: string[];
 };
 
 async function result(response: Response) { const body = await response.json(); if (!response.ok) throw new Error(body.error?.message ?? "The operation failed."); return body; }
 const displayDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
 
-export function ReleaseEditor({ release, role, artists, labels, tracks, canonicalPreview, proposedLegacyPreview, publishedLegacyComplete }: { release: ReleaseEditorData; role: string; artists: ReleaseArtistOption[]; labels: ReleaseLabelOption[]; tracks: ReleaseTrackOption[]; canonicalPreview: unknown; proposedLegacyPreview: unknown; publishedLegacyComplete: unknown }) {
+export function ReleaseEditor({ release, role, artists, labels, tracks, mediaAssets, canonicalPreview, proposedLegacyPreview, publishedLegacyComplete }: { release: ReleaseEditorData; role: string; artists: ReleaseArtistOption[]; labels: ReleaseLabelOption[]; tracks: ReleaseTrackOption[]; mediaAssets: ArtworkOption[]; canonicalPreview: unknown; proposedLegacyPreview: unknown; publishedLegacyComplete: unknown }) {
   const canWrite = role !== "VIEWER"; const [pending, setPending] = useState(false); const [error, setError] = useState(""); const [artistQuery, setArtistQuery] = useState(""); const [trackQuery, setTrackQuery] = useState("");
   const [title, setTitle] = useState(release.title); const [primaryArtistId, setPrimaryArtistId] = useState(release.primaryArtistId); const [secondaryArtistId, setSecondaryArtistId] = useState(release.secondaryArtistId ?? ""); const [labelId, setLabelId] = useState(release.labelId); const [releaseDate, setReleaseDate] = useState(release.releaseDate ?? ""); const [scheduledFor, setScheduledFor] = useState("");
   const [links, setLinks] = useState({ spotifyUrl: release.spotifyUrl ?? "", beatportUrl: release.beatportUrl ?? "", traxsourceUrl: release.traxsourceUrl ?? "", bandcampUrl: release.bandcampUrl ?? "", appleMusicUrl: release.appleMusicUrl ?? "", soundcloudUrl: release.soundcloudUrl ?? "" });
+  const [artworkAssetId, setArtworkAssetId] = useState<string | null>(release.artworkAssetId);
   const [trackIds, setTrackIds] = useState(release.trackIds); const [pickerId, setPickerId] = useState(""); const [dragged, setDragged] = useState<number | null>(null);
   const shownArtists = useMemo(() => artists.filter((artist) => artist.name.toLowerCase().includes(artistQuery.toLowerCase()) || artist.id === primaryArtistId || artist.id === secondaryArtistId), [artists, artistQuery, primaryArtistId, secondaryArtistId]);
   const availableTracks = useMemo(() => tracks.filter((track) => !trackIds.includes(track.id) && (track.title.toLowerCase().includes(trackQuery.toLowerCase()) || track.primaryArtistName.toLowerCase().includes(trackQuery.toLowerCase()))), [tracks, trackIds, trackQuery]);
@@ -36,7 +38,7 @@ export function ReleaseEditor({ release, role, artists, labels, tracks, canonica
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setError("");
     try {
-      await result(await fetch(`/api/admin/releases/${release.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, primaryArtistId, secondaryArtistId, labelId, releaseDate, ...links, expectedWorkingVersion: release.workingVersion }) }));
+      await result(await fetch(`/api/admin/releases/${release.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, primaryArtistId, secondaryArtistId, labelId, releaseDate, artworkAssetId, ...links, expectedWorkingVersion: release.workingVersion }) }));
       const tracksChanged = trackIds.some((id, index) => release.trackIds[index] !== id) || trackIds.length !== release.trackIds.length;
       if (tracksChanged) {
         const sameMembership = trackIds.length === release.trackIds.length && trackIds.every((id) => release.trackIds.includes(id));
@@ -67,7 +69,7 @@ export function ReleaseEditor({ release, role, artists, labels, tracks, canonica
         })}</div>
         {error && <div className="alert error" role="alert">{error}</div>}{canWrite && release.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save Draft</button></div>}
       </form>
-      <section className="panel media-placeholder"><div className="eyebrow">Media</div><h2>Release artwork</h2><p className="muted">Artwork is intentionally deferred until the Media phase. No placeholder or legacy path is created.</p></section>
+      <ArtworkPicker value={artworkAssetId} assets={mediaAssets} canWrite={canWrite && release.status !== "ARCHIVED"} requiredForPublish onChange={setArtworkAssetId} />
       {canWrite && <section className="panel publish-panel"><h2>Publication</h2><p className="muted">Publishing freezes Release metadata, Artist and Label delivery values, exact Track revisions, and Track order.</p><div className="button-row wrap">
         {release.status !== "ARCHIVED" && <button className="button" disabled={pending} onClick={() => perform("publish", { expectedWorkingVersion: release.workingVersion })}>Publish now</button>}
         {release.status === "PUBLISHED" && <button className="button" disabled={pending} onClick={() => perform("unpublish")}>Unpublish</button>}

@@ -4,11 +4,12 @@ import { requirePermission } from "@/lib/authorization";
 import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { normalizePodcastChapters, podcastDate, podcastDraftSchema, podcastListSchema, publishPodcastSchema, replacePodcastChaptersSchema, schedulePodcastSchema, updatePodcastSchema, type PodcastDraftInput } from "@/modules/podcasts/schema";
+import { assertReadyArtwork, auditMediaAttachment } from "@/modules/media/service";
 
 type Tx = Prisma.TransactionClient;
 
 function draftData(data: ReturnType<typeof podcastDraftSchema.parse>) {
-  return { title: data.title, primaryArtistId: data.primaryArtistId, secondaryArtistId: data.secondaryArtistId || null, labelId: data.labelId, episodeDate: podcastDate(data.episodeDate), durationMs: data.durationMs ?? null };
+  return { title: data.title, primaryArtistId: data.primaryArtistId, secondaryArtistId: data.secondaryArtistId || null, labelId: data.labelId, episodeDate: podcastDate(data.episodeDate), durationMs: data.durationMs ?? null, artworkAssetId: data.artworkAssetId || null };
 }
 
 async function lockPodcast(tx: Tx, id: string): Promise<PodcastEpisode> {
@@ -45,6 +46,7 @@ async function publicationDependencies(tx: Tx, episode: PodcastEpisode) {
   if (chapters.some((chapter, position) => chapter.position !== position || !chapter.artist.trim() || !chapter.title.trim() || (chapter.durationMs !== null && chapter.durationMs < 0))) {
     throw new AppError("Podcast chapters must be valid and use contiguous positions.", 422, "CHAPTERS_INVALID");
   }
+  await assertReadyArtwork(tx, episode.artworkAssetId, true);
   return { primary: primary!, secondary, label, chapters };
 }
 
@@ -57,6 +59,7 @@ async function snapshot(tx: Tx, episode: PodcastEpisode, createdById: string): P
     secondaryArtistId: dependencies.secondary?.id ?? null, secondaryArtistLegacyId: dependencies.secondary?.legacyId ?? null, secondaryArtistName: dependencies.secondary?.publishedRevision?.name ?? null,
     labelId: dependencies.label.id, labelName: dependencies.label.name, labelLegacyValue: dependencies.label.legacyValue,
     episodeDate: episode.episodeDate!, durationMs: episode.durationMs, createdById,
+    artworkAssetId: episode.artworkAssetId,
   } });
   if (dependencies.chapters.length) await tx.podcastChapterRevision.createMany({ data: dependencies.chapters.map((chapter) => ({
     id: crypto.randomUUID(), episodeRevisionId: revision.id, sourceChapterId: chapter.id, position: chapter.position, artist: chapter.artist, title: chapter.title, legacyReference: chapter.legacyReference, durationMs: chapter.durationMs,
@@ -76,6 +79,7 @@ export async function createPodcast(actor: Actor, input: PodcastDraftInput) {
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const episode = await tx.podcastEpisode.create({ data: { id: crypto.randomUUID(), ...draftData(data) } });
+      await auditMediaAttachment(tx, actor, null, episode.artworkAssetId, { contentType: "PODCAST", contentId: episode.id });
       await audit(tx, episode, actor.userId, "CREATE"); return episode;
     });
   } catch (error) {
@@ -91,8 +95,9 @@ export async function updatePodcastDraft(actor: Actor, id: string, input: unknow
       const episode = await lockPodcast(tx, id); assertEditable(episode); assertVersion(episode, data.expectedWorkingVersion);
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label || (!label.active && label.id !== episode.labelId)) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
-      const next = draftData(data); const changedFields = Object.keys(next).filter((key) => String(episode[key as keyof PodcastEpisode] ?? "") !== String(next[key as keyof typeof next] ?? ""));
+      const next = draftData(data); if (data.artworkAssetId === undefined) next.artworkAssetId = episode.artworkAssetId; const changedFields = Object.keys(next).filter((key) => String(episode[key as keyof PodcastEpisode] ?? "") !== String(next[key as keyof typeof next] ?? ""));
       const updated = await tx.podcastEpisode.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
+      await auditMediaAttachment(tx, actor, episode.artworkAssetId, updated.artworkAssetId, { contentType: "PODCAST", contentId: id });
       await audit(tx, updated, actor.userId, "EDIT", { changedFields, fromWorkingVersion: episode.workingVersion, toWorkingVersion: updated.workingVersion }); return updated;
     });
   } catch (error) {
@@ -151,6 +156,8 @@ export async function runScheduledPodcastPublication(now = new Date()) {
     const didPublish = await prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM podcast_episodes WHERE id = ${candidate.id}::uuid AND status = 'SCHEDULED' AND "scheduledFor" <= ${now} FOR UPDATE SKIP LOCKED`;
       if (!rows[0]) return false; const episode = await tx.podcastEpisode.findUnique({ where: { id: candidate.id } }); if (!episode?.scheduledRevisionId) return false;
+      const revision = await tx.podcastEpisodeRevision.findUnique({ where: { id: episode.scheduledRevisionId }, include: { artworkAsset: true } });
+      if (!revision?.artworkAsset || revision.artworkAsset.status !== "READY") return false;
       const updated = await tx.podcastEpisode.update({ where: { id: episode.id }, data: { status: PodcastStatus.PUBLISHED, publishedRevisionId: episode.scheduledRevisionId, scheduledRevisionId: null, scheduledFor: null } });
       await audit(tx, updated, null, "PUBLISH", { revisionId: episode.scheduledRevisionId, scheduled: true }); return true;
     }); if (didPublish) published += 1;
@@ -185,8 +192,8 @@ export async function restorePodcast(actor: Actor, id: string) {
 export async function getPodcast(actor: Actor, id: string) {
   requirePermission(actor, "podcast:read"); const episode = await prisma.podcastEpisode.findUnique({ where: { id }, include: {
     primaryArtist: true, secondaryArtist: true, label: true, chapters: { orderBy: { position: "asc" } },
-    publishedRevision: { include: { chapters: { orderBy: { position: "asc" } } } }, scheduledRevision: { include: { chapters: { orderBy: { position: "asc" } } } },
-    revisions: { orderBy: { revisionNumber: "desc" }, include: { chapters: { orderBy: { position: "asc" } } } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 40, include: { actor: true } },
+    artworkAsset: true, publishedRevision: { include: { artworkAsset: true, chapters: { orderBy: { position: "asc" } } } }, scheduledRevision: { include: { artworkAsset: true, chapters: { orderBy: { position: "asc" } } } },
+    revisions: { orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true, chapters: { orderBy: { position: "asc" } } } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 40, include: { actor: true } },
   } }); if (!episode) throw new AppError("Podcast not found.", 404, "PODCAST_NOT_FOUND"); return episode;
 }
 
@@ -208,15 +215,15 @@ export async function getPodcastPreview(actor: Actor, id: string) {
 }
 
 export async function getLegacyPodcastPreview(actor: Actor, id: string) {
-  requirePermission(actor, "podcast:read"); const episode = await prisma.podcastEpisode.findUnique({ where: { id }, include: { publishedRevision: { include: { chapters: { orderBy: { position: "asc" } } } } } });
+  requirePermission(actor, "podcast:read"); const episode = await prisma.podcastEpisode.findUnique({ where: { id }, include: { publishedRevision: { include: { artworkAsset: true, chapters: { orderBy: { position: "asc" } } } } } });
   if (!episode) throw new AppError("Podcast not found.", 404, "PODCAST_NOT_FOUND"); return episode.publishedRevision && (episode.status === PodcastStatus.PUBLISHED || episode.status === PodcastStatus.SCHEDULED) ? episode : null;
 }
 
 const publishedWhere: Prisma.PodcastEpisodeWhereInput = { publishedRevisionId: { not: null }, status: { in: [PodcastStatus.PUBLISHED, PodcastStatus.SCHEDULED] } };
 export async function listPublishedPodcastsForLegacy(limit?: number, offset = 0) {
-  const [episodes, total] = await prisma.$transaction([prisma.podcastEpisode.findMany({ where: publishedWhere, include: { publishedRevision: { include: { chapters: { orderBy: { position: "asc" } } } } }, orderBy: [{ episodeDate: "desc" }, { legacyId: "desc" }], take: limit, skip: offset }), prisma.podcastEpisode.count({ where: publishedWhere })]); return { episodes, total };
+  const [episodes, total] = await prisma.$transaction([prisma.podcastEpisode.findMany({ where: publishedWhere, include: { publishedRevision: { include: { artworkAsset: true, chapters: { orderBy: { position: "asc" } } } } }, orderBy: [{ episodeDate: "desc" }, { legacyId: "desc" }], take: limit, skip: offset }), prisma.podcastEpisode.count({ where: publishedWhere })]); return { episodes, total };
 }
 
 export async function getPublishedPodcastForLegacy(legacyId: number) {
-  return prisma.podcastEpisode.findFirst({ where: { ...publishedWhere, legacyId }, include: { publishedRevision: { include: { chapters: { orderBy: { position: "asc" } } } } } });
+  return prisma.podcastEpisode.findFirst({ where: { ...publishedWhere, legacyId }, include: { publishedRevision: { include: { artworkAsset: true, chapters: { orderBy: { position: "asc" } } } } } });
 }

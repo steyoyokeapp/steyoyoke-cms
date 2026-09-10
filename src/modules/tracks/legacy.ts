@@ -1,9 +1,11 @@
-import type { TrackRevision } from "@/generated/prisma/client";
+import type { MediaAsset, TrackRevision } from "@/generated/prisma/client";
 import { isLegacyAuthorized, legacyUnauthorized } from "@/modules/artists/legacy";
 import { formatLegacyDuration } from "@/modules/tracks/duration";
 import { getPublishedTrackForLegacy, listPublishedTracksForLegacy } from "@/modules/tracks/service";
+import { LegacyMediaSerializer } from "@/modules/media/legacy";
 
-export function serializeLegacyTrack(revision: TrackRevision, legacyId: number) {
+export function serializeLegacyTrack(revision: TrackRevision & { artworkAsset?: MediaAsset | null }, legacyId: number) {
+  const covers = LegacyMediaSerializer.covers(revision.artworkAsset);
   return {
     id: String(legacyId),
     title: revision.title,
@@ -15,11 +17,7 @@ export function serializeLegacyTrack(revision: TrackRevision, legacyId: number) 
     duration: formatLegacyDuration(revision.durationMs),
     label: revision.labelLegacyValue,
     artist_feature_times: null,
-    cover_download: null,
-    cover_thumbnail_low: null,
-    cover_thumbnail_high: null,
-    cover_low: null,
-    cover_high: null,
+    ...covers,
     podcast_link: null,
     podcast_link_title: null,
     genre: null,

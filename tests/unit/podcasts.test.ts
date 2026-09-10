@@ -5,7 +5,7 @@ import { legacyPodcastDate, legacyPodcastLabel, legacyPodcastTitle, serializeLeg
 import { normalizePodcastChapters, podcastDraftSchema } from "@/modules/podcasts/schema";
 
 const primaryId = crypto.randomUUID(); const labelId = crypto.randomUUID(); const revisionId = crypto.randomUUID();
-const revision = { id: revisionId, episodeId: crypto.randomUUID(), revisionNumber: 1, sourceWorkingVersion: 2, title: "Steyoyoke Example", primaryArtistId: primaryId, primaryArtistLegacyId: 400, primaryArtistName: "Published Artist", secondaryArtistId: null, secondaryArtistLegacyId: null, secondaryArtistName: null, labelId, labelName: "Steyoyoke Black", labelLegacyValue: "STEYOYOKE_BLACK", episodeDate: new Date("2026-01-02T00:00:00.000Z"), durationMs: 3825000, createdById: crypto.randomUUID(), createdAt: new Date() } satisfies PodcastEpisodeRevision;
+const revision = { id: revisionId, episodeId: crypto.randomUUID(), revisionNumber: 1, sourceWorkingVersion: 2, title: "Steyoyoke Example", primaryArtistId: primaryId, primaryArtistLegacyId: 400, primaryArtistName: "Published Artist", secondaryArtistId: null, secondaryArtistLegacyId: null, secondaryArtistName: null, labelId, labelName: "Steyoyoke Black", labelLegacyValue: "STEYOYOKE_BLACK", episodeDate: new Date("2026-01-02T00:00:00.000Z"), durationMs: 3825000, artworkAssetId: null, createdById: crypto.randomUUID(), createdAt: new Date() } satisfies PodcastEpisodeRevision;
 const chapters = [{ id: crypto.randomUUID(), episodeRevisionId: revisionId, sourceChapterId: null, position: 0, artist: "Artist A", title: "Opening", legacyReference: null, durationMs: 225000 }] satisfies PodcastChapterRevision[];
 
 describe("Podcast validation", () => {

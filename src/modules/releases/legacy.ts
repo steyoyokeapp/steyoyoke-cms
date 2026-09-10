@@ -1,10 +1,11 @@
-import type { ReleaseRevision, TrackRevision } from "@/generated/prisma/client";
+import type { MediaAsset, ReleaseRevision, TrackRevision } from "@/generated/prisma/client";
 import { isLegacyAuthorized, legacyUnauthorized } from "@/modules/artists/legacy";
 import { getPublishedReleaseForLegacy, listLegacyReleaseArtists, listLegacyReleaseTitles, listLegacyReleaseTrackTitles, listPublishedReleasesForLegacy, queryPublishedReleaseFilter } from "@/modules/releases/legacy-query";
 import { serializeLegacyTrack } from "@/modules/tracks/legacy";
+import { LegacyMediaSerializer } from "@/modules/media/legacy";
 
 export type ReleaseAliasMode = "paginated" | "unpaginated" | "single" | "complete" | "filter";
-type LegacyReleaseSnapshot = Pick<ReleaseRevision, "title" | "primaryArtistLegacyId" | "primaryArtistName" | "secondaryArtistLegacyId" | "secondaryArtistName" | "releaseDate" | "labelLegacyValue" | "bandcampUrl" | "appleMusicUrl" | "beatportUrl" | "traxsourceUrl" | "spotifyUrl" | "soundcloudUrl">;
+type LegacyReleaseSnapshot = Pick<ReleaseRevision, "title" | "primaryArtistLegacyId" | "primaryArtistName" | "secondaryArtistLegacyId" | "secondaryArtistName" | "releaseDate" | "labelLegacyValue" | "bandcampUrl" | "appleMusicUrl" | "beatportUrl" | "traxsourceUrl" | "spotifyUrl" | "soundcloudUrl"> & { artworkAsset?: MediaAsset | null };
 
 export function legacyReleaseTitle(title: string) { return title.startsWith("Steyoyoke ") ? title.slice(10) : title; }
 export function legacyReleaseLabel(legacyValue: string) { return legacyValue.split(/_+/).filter(Boolean).join(" "); }
@@ -13,6 +14,7 @@ export function legacyReleaseDate(date: Date) {
 }
 
 export function serializeLegacyRelease(revision: LegacyReleaseSnapshot, legacyId: number, mode: ReleaseAliasMode, titleTracks?: Array<{ track_title: string; id: string }>) {
+  const covers = LegacyMediaSerializer.covers(revision.artworkAsset);
   const aliases = mode === "paginated" || mode === "complete"
     ? { artist_name: revision.primaryArtistName, secondary_artist_name: revision.secondaryArtistName }
     : mode === "unpaginated" || mode === "filter"
@@ -22,14 +24,14 @@ export function serializeLegacyRelease(revision: LegacyReleaseSnapshot, legacyId
     id: String(legacyId), title: legacyReleaseTitle(revision.title), artist_id: String(revision.primaryArtistLegacyId),
     secondary_artist_id: revision.secondaryArtistLegacyId === null ? null : String(revision.secondaryArtistLegacyId),
     date: legacyReleaseDate(revision.releaseDate), label: legacyReleaseLabel(revision.labelLegacyValue),
-    cover_download: null, cover_thumbnail_low: null, cover_thumbnail_high: null, cover_low: null, cover_high: null,
+    ...covers,
     web_link: revision.bandcampUrl, itunes_link: revision.appleMusicUrl, beatport_link: revision.beatportUrl,
     traxsource_link: revision.traxsourceUrl, spotify_link: revision.spotifyUrl, soundcloud_link: revision.soundcloudUrl,
     ...aliases, ...(titleTracks ? { title_track: titleTracks } : {}),
   };
 }
 
-export function serializeLegacyReleaseCompleteTrack(revision: TrackRevision, legacyId: number) {
+export function serializeLegacyReleaseCompleteTrack(revision: TrackRevision & { artworkAsset?: MediaAsset | null }, legacyId: number) {
   const track = { ...serializeLegacyTrack(revision, legacyId) } as Omit<ReturnType<typeof serializeLegacyTrack>, "artist_name"> & { artist_name?: string };
   delete track.artist_name;
   return { ...track, title: legacyReleaseTitle(revision.title), label: legacyReleaseLabel(revision.labelLegacyValue), artist_track_name: revision.primaryArtistName, secondary_artist_track_name: revision.secondaryArtistName };

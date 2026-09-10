@@ -17,6 +17,7 @@ import {
   type ArtistDraftInput,
 } from "@/modules/artists/schema";
 import { slugify } from "@/modules/artists/slug";
+import { assertReadyArtwork, auditMediaAttachment } from "@/modules/media/service";
 
 type Tx = Prisma.TransactionClient;
 
@@ -75,6 +76,7 @@ async function snapshot(
   artist: Artist,
   createdById: string,
 ): Promise<ArtistRevision> {
+  await assertReadyArtwork(tx, artist.imageAssetId, false);
   const latest = await tx.artistRevision.aggregate({
     where: { artistId: artist.id },
     _max: { revisionNumber: true },
@@ -89,6 +91,7 @@ async function snapshot(
       slug: artist.slug,
       shortBio: artist.shortBio,
       facebookUrl: artist.facebookUrl,
+      imageAssetId: artist.imageAssetId,
       createdById,
     },
   });
@@ -120,8 +123,10 @@ export async function createArtist(actor: Actor, input: ArtistDraftInput) {
             slug,
             shortBio: trimNullable(data.shortBio),
             facebookUrl: trimNullable(data.facebookUrl),
+            imageAssetId: data.imageAssetId || null,
           },
         });
+        await auditMediaAttachment(tx, actor, null, artist.imageAssetId, { contentType: "ARTIST", contentId: artist.id });
         await audit(tx, artist.id, actor.userId, "CREATE", { legacyId: artist.legacyId });
         return artist;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -148,9 +153,11 @@ export async function updateArtistDraft(actor: Actor, id: string, input: unknown
           slug,
           shortBio: trimNullable(data.shortBio),
           facebookUrl: trimNullable(data.facebookUrl),
+          imageAssetId: data.imageAssetId === undefined ? artist.imageAssetId : data.imageAssetId || null,
           workingVersion: { increment: 1 },
         },
       });
+      await auditMediaAttachment(tx, actor, artist.imageAssetId, updated.imageAssetId, { contentType: "ARTIST", contentId: id });
       await audit(tx, id, actor.userId, "EDIT", {
         fromWorkingVersion: artist.workingVersion,
         toWorkingVersion: updated.workingVersion,
@@ -268,6 +275,8 @@ export async function runScheduledArtistPublication(now = new Date()) {
       if (!rows[0]) return false;
       const artist = await tx.artist.findUnique({ where: { id: candidate.id } });
       if (!artist?.scheduledRevisionId) return false;
+      const revision = await tx.artistRevision.findUnique({ where: { id: artist.scheduledRevisionId }, include: { imageAsset: true } });
+      if (!revision || (revision.imageAssetId && revision.imageAsset?.status !== "READY")) return false;
       await tx.artist.update({
         where: { id: artist.id },
         data: {
@@ -369,9 +378,10 @@ export async function getArtist(actor: Actor, id: string) {
   const artist = await prisma.artist.findUnique({
     where: { id },
     include: {
-      publishedRevision: true,
-      scheduledRevision: true,
-      revisions: { orderBy: { revisionNumber: "desc" } },
+      imageAsset: true,
+      publishedRevision: { include: { imageAsset: true } },
+      scheduledRevision: { include: { imageAsset: true } },
+      revisions: { orderBy: { revisionNumber: "desc" }, include: { imageAsset: true } },
       auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } },
     },
   });
@@ -418,7 +428,7 @@ export async function getLegacyArtistPreview(actor: Actor, id: string) {
   requirePermission(actor, "artist:read");
   const artist = await prisma.artist.findUnique({
     where: { id },
-    include: { publishedRevision: true },
+    include: { publishedRevision: { include: { imageAsset: true } } },
   });
   if (!artist) throw new AppError("Artist not found.", 404, "ARTIST_NOT_FOUND");
   return artist.publishedRevision
@@ -432,7 +442,7 @@ export async function listPublishedArtistsForLegacy() {
       publishedRevisionId: { not: null },
       status: { in: [ArtistStatus.PUBLISHED, ArtistStatus.SCHEDULED] },
     },
-    include: { publishedRevision: true },
+    include: { publishedRevision: { include: { imageAsset: true } } },
     orderBy: { legacyId: "asc" },
   });
 }
@@ -444,6 +454,6 @@ export async function getPublishedArtistForLegacy(legacyId: number) {
       publishedRevisionId: { not: null },
       status: { in: [ArtistStatus.PUBLISHED, ArtistStatus.SCHEDULED] },
     },
-    include: { publishedRevision: true },
+    include: { publishedRevision: { include: { imageAsset: true } } },
   });
 }

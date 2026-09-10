@@ -5,6 +5,7 @@ import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { releaseDate, releaseDraftSchema, releaseListSchema, replaceReleaseTracksSchema, publishReleaseSchema, scheduleReleaseSchema, updateReleaseSchema, type ReleaseDraftInput } from "@/modules/releases/schema";
 import { serializeLegacyRelease, serializeLegacyReleaseCompleteTrack } from "@/modules/releases/legacy";
+import { assertReadyArtwork, auditMediaAttachment } from "@/modules/media/service";
 
 type Tx = Prisma.TransactionClient;
 const urlFields = ["spotifyUrl", "beatportUrl", "traxsourceUrl", "bandcampUrl", "appleMusicUrl", "soundcloudUrl"] as const;
@@ -18,6 +19,7 @@ function draftData(data: ReturnType<typeof releaseDraftSchema.parse>) {
   return {
     title: data.title, primaryArtistId: data.primaryArtistId, secondaryArtistId: data.secondaryArtistId || null,
     labelId: data.labelId, releaseDate: releaseDate(data.releaseDate),
+    artworkAssetId: data.artworkAssetId || null,
     ...Object.fromEntries(urlFields.map((field) => [field, nullable(data[field])])),
   };
 }
@@ -59,6 +61,7 @@ async function publicationDependencies(tx: Tx, release: Release) {
   if (blocked.length) {
     throw new AppError(`Release publication is blocked by: ${blocked.map(({ track }) => `${track.title} (#${track.legacyId})`).join(", ")}.`, 422, "TRACK_NOT_PUBLISHABLE", { tracks: blocked.map(({ track }) => ({ id: track.id, legacyId: track.legacyId, title: track.title, status: track.status })) });
   }
+  await assertReadyArtwork(tx, release.artworkAssetId, true);
   return { primary: primary!, secondary, label, memberships };
 }
 
@@ -70,6 +73,7 @@ async function snapshot(tx: Tx, release: Release, createdById: string) {
     title: release.title, primaryArtistId: dependencies.primary.id, primaryArtistLegacyId: dependencies.primary.legacyId, primaryArtistName: dependencies.primary.publishedRevision!.name,
     secondaryArtistId: dependencies.secondary?.id ?? null, secondaryArtistLegacyId: dependencies.secondary?.legacyId ?? null, secondaryArtistName: dependencies.secondary?.publishedRevision?.name ?? null,
     labelId: dependencies.label.id, labelName: dependencies.label.name, labelLegacyValue: dependencies.label.legacyValue, releaseDate: release.releaseDate!,
+    artworkAssetId: release.artworkAssetId,
     ...Object.fromEntries(urlFields.map((field) => [field, release[field]])), createdById,
   } });
   await tx.releaseRevisionTrack.createMany({ data: dependencies.memberships.map(({ track }, position) => ({ id: crypto.randomUUID(), releaseRevisionId: revision.id, trackRevisionId: track.publishedRevision!.id, position })) });
@@ -88,6 +92,7 @@ export async function createRelease(actor: Actor, input: ReleaseDraftInput) {
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const release = await tx.release.create({ data: { id: crypto.randomUUID(), ...draftData(data) } });
+      await auditMediaAttachment(tx, actor, null, release.artworkAssetId, { contentType: "RELEASE", contentId: release.id });
       await audit(tx, release, actor.userId, "CREATE"); return release;
     });
   } catch (error) {
@@ -103,8 +108,9 @@ export async function updateReleaseDraft(actor: Actor, id: string, input: unknow
       const release = await lockRelease(tx, id); assertEditable(release); assertVersion(release, data.expectedWorkingVersion);
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label || (!label.active && label.id !== release.labelId)) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
-      const next = draftData(data); const changedFields = Object.keys(next).filter((key) => String(release[key as keyof Release] ?? "") !== String(next[key as keyof typeof next] ?? ""));
+      const next = draftData(data); if (data.artworkAssetId === undefined) next.artworkAssetId = release.artworkAssetId; const changedFields = Object.keys(next).filter((key) => String(release[key as keyof Release] ?? "") !== String(next[key as keyof typeof next] ?? ""));
       const updated = await tx.release.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
+      await auditMediaAttachment(tx, actor, release.artworkAssetId, updated.artworkAssetId, { contentType: "RELEASE", contentId: id });
       await audit(tx, updated, actor.userId, "EDIT", { changedFields, fromWorkingVersion: release.workingVersion, toWorkingVersion: updated.workingVersion }); return updated;
     });
   } catch (error) {
@@ -165,10 +171,10 @@ export async function cancelReleaseSchedule(actor: Actor, id: string) {
 }
 
 async function scheduledRevisionReady(tx: Tx, revisionId: string) {
-  const revision = await tx.releaseRevision.findUnique({ where: { id: revisionId }, include: { primaryArtist: { include: { publishedRevision: true } }, secondaryArtist: { include: { publishedRevision: true } }, tracks: { include: { trackRevision: { include: { track: true } } } } } });
+  const revision = await tx.releaseRevision.findUnique({ where: { id: revisionId }, include: { artworkAsset: true, primaryArtist: { include: { publishedRevision: true } }, secondaryArtist: { include: { publishedRevision: true } }, tracks: { include: { trackRevision: { include: { track: true } } } } } });
   if (!revision) return false;
   const artistReady = (artist: typeof revision.primaryArtist | null) => artist?.publishedRevision && (artist.status === ArtistStatus.PUBLISHED || artist.status === ArtistStatus.SCHEDULED);
-  return Boolean(artistReady(revision.primaryArtist) && (!revision.secondaryArtist || artistReady(revision.secondaryArtist)) && revision.tracks.length && revision.tracks.every(({ trackRevision }) => trackRevision.track.publishedRevisionId && (trackRevision.track.status === TrackStatus.PUBLISHED || trackRevision.track.status === TrackStatus.SCHEDULED)));
+  return Boolean(revision.artworkAsset?.status === "READY" && artistReady(revision.primaryArtist) && (!revision.secondaryArtist || artistReady(revision.secondaryArtist)) && revision.tracks.length && revision.tracks.every(({ trackRevision }) => trackRevision.track.publishedRevisionId && (trackRevision.track.status === TrackStatus.PUBLISHED || trackRevision.track.status === TrackStatus.SCHEDULED)));
 }
 
 export async function runScheduledReleasePublication(now = new Date()) {
@@ -212,18 +218,19 @@ const releaseInclude = {
   primaryArtist: { include: { publishedRevision: true } },
   secondaryArtist: { include: { publishedRevision: true } },
   label: true,
+  artworkAsset: true,
   tracks: {
     include: { track: { include: { primaryArtist: true, label: true, publishedRevision: true } } },
     orderBy: { position: "asc" as const },
   },
   publishedRevision: {
-    include: { tracks: { include: { trackRevision: { include: { track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
+    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
   },
   scheduledRevision: {
-    include: { tracks: { include: { trackRevision: { include: { track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
+    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
   },
   revisions: {
-    include: { tracks: { include: { trackRevision: { include: { track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
+    include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
     orderBy: { revisionNumber: "desc" as const },
   },
   auditLogs: { orderBy: { createdAt: "desc" as const }, take: 30, include: { actor: true } },
@@ -256,6 +263,7 @@ export async function getReleasePreview(actor: Actor, id: string) {
     artists: { primary: { id: release.primaryArtist.id, name: release.primaryArtist.name }, secondary: release.secondaryArtist ? { id: release.secondaryArtist.id, name: release.secondaryArtist.name } : null },
     label: { id: release.label.id, name: release.label.name, legacyValue: release.label.legacyValue }, releaseDate: release.releaseDate,
     links: Object.fromEntries(urlFields.map((field) => [field, release[field]])), status: release.status, workingVersion: release.workingVersion,
+    artwork: release.artworkAsset ? { mediaAssetId: release.artworkAsset.id, status: release.artworkAsset.status, dimensions: `${release.artworkAsset.width}×${release.artworkAsset.height}`, preview: `/assets/uploads/files/${release.artworkAsset.compatibilityFilename}` } : null,
     tracks: release.tracks.map(({ track, position }) => ({ position, id: track.id, legacyId: track.legacyId, title: track.title, currentPublishedRevisionId: track.publishedRevisionId, currentPublishedRevisionNumber: track.publishedRevision?.revisionNumber ?? null, frozenRevisionId: frozenByTrack.get(track.id) ?? null, changedSinceReleasePublication: frozenByTrack.has(track.id) && frozenByTrack.get(track.id) !== track.publishedRevisionId })),
   };
 }
@@ -268,6 +276,7 @@ export async function getLegacyReleasePreview(actor: Actor, id: string) {
     secondaryArtistLegacyId: release.secondaryArtist?.legacyId ?? null, secondaryArtistName: release.secondaryArtist?.publishedRevision?.name ?? release.secondaryArtist?.name ?? null,
     releaseDate: release.releaseDate, labelLegacyValue: release.label.legacyValue, bandcampUrl: release.bandcampUrl, appleMusicUrl: release.appleMusicUrl,
     beatportUrl: release.beatportUrl, traxsourceUrl: release.traxsourceUrl, spotifyUrl: release.spotifyUrl, soundcloudUrl: release.soundcloudUrl,
+    artworkAsset: release.artworkAsset,
   };
   return { releases: [serializeLegacyRelease(snapshot, release.legacyId, "complete")], base_cover_folder: "/1440/", main_cover_folder: "/assets/uploads/files" };
 }
@@ -280,6 +289,7 @@ export async function getLegacyReleaseCompletePreview(actor: Actor, id: string) 
     secondaryArtistLegacyId: release.secondaryArtist?.legacyId ?? null, secondaryArtistName: release.secondaryArtist?.publishedRevision?.name ?? release.secondaryArtist?.name ?? null,
     releaseDate: release.releaseDate, labelLegacyValue: release.label.legacyValue, bandcampUrl: release.bandcampUrl, appleMusicUrl: release.appleMusicUrl,
     beatportUrl: release.beatportUrl, traxsourceUrl: release.traxsourceUrl, spotifyUrl: release.spotifyUrl, soundcloudUrl: release.soundcloudUrl,
+    artworkAsset: release.artworkAsset,
   };
   return { releasecomplete: { "0": serializeLegacyRelease(snapshot, release.legacyId, "complete"), tracks: release.tracks.flatMap(({ track }) => track.publishedRevision ? [serializeLegacyReleaseCompleteTrack(track.publishedRevision, track.legacyId)] : []) }, base_cover_folder: "/1440/", main_cover_folder: "/assets/uploads/files" };
 }

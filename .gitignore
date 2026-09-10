@@ -39,6 +39,7 @@ yarn-error.log*
 /playwright-report
 /test-results
 /src/generated/prisma
+/.local-storage
 
 # vercel
 .vercel

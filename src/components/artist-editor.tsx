@@ -2,15 +2,16 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
 
 type Revision = {
   id: string; revisionNumber: number; sourceWorkingVersion: number; name: string; slug: string;
-  shortBio: string | null; facebookUrl: string | null; createdAt: string;
+  shortBio: string | null; facebookUrl: string | null; imageAsset: { compatibilityFilename: string } | null; createdAt: string;
 };
 type Audit = { id: string; action: string; createdAt: string; actor: { name: string } | null };
 export type ArtistEditorData = {
   id: string; legacyId: number; name: string; slug: string; shortBio: string | null;
-  facebookUrl: string | null; status: string; workingVersion: number; scheduledFor: string | null;
+  facebookUrl: string | null; imageAssetId: string | null; status: string; workingVersion: number; scheduledFor: string | null;
   publishedRevision: Revision | null; scheduledRevision: Revision | null;
   revisions: Revision[]; auditLogs: Audit[];
 };
@@ -22,7 +23,7 @@ async function readResult(response: Response) {
 }
 const displayDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
 
-export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role: string }) {
+export function ArtistEditor({ artist, role, mediaAssets }: { artist: ArtistEditorData; role: string; mediaAssets: ArtworkOption[] }) {
   const router = useRouter();
   const canWrite = role !== "VIEWER";
   const isAdmin = role === "ADMIN";
@@ -33,17 +34,20 @@ export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role:
   const [slug, setSlug] = useState(artist.slug);
   const [shortBio, setShortBio] = useState(artist.shortBio ?? "");
   const [facebookUrl, setFacebookUrl] = useState(artist.facebookUrl ?? "");
+  const [imageAssetId, setImageAssetId] = useState<string | null>(artist.imageAssetId);
   const [scheduledFor, setScheduledFor] = useState("");
 
+  const selectedArtwork = mediaAssets.find(({ id }) => id === imageAssetId);
   const canonicalPreview = {
     id: artist.id, legacyId: artist.legacyId, name, slug,
     shortBio: shortBio || null, facebookUrl: facebookUrl || null,
     status: artist.status, workingVersion: artist.workingVersion,
+    artwork: selectedArtwork ? { mediaAssetId: selectedArtwork.id, status: selectedArtwork.status, dimensions: `${selectedArtwork.width}×${selectedArtwork.height}`, preview: `/assets/uploads/files/${selectedArtwork.compatibilityFilename}` } : null,
   };
   const isLegacyVisible = artist.publishedRevision && ["PUBLISHED", "SCHEDULED"].includes(artist.status);
   const legacyPreview = isLegacyVisible && artist.publishedRevision ? {
     artists: [{
-      id: String(artist.legacyId), name: artist.publishedRevision.name, image: null,
+      id: String(artist.legacyId), name: artist.publishedRevision.name, image: artist.publishedRevision.imageAsset ? `/assets/uploads/files/1440/${artist.publishedRevision.imageAsset.compatibilityFilename}` : null,
       facebook_url: artist.publishedRevision.facebookUrl,
       description_short: artist.publishedRevision.shortBio, priority: null,
     }],
@@ -74,7 +78,7 @@ export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role:
     try {
       const response = await fetch(`/api/admin/artists/${artist.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, slug, shortBio, facebookUrl, expectedWorkingVersion: artist.workingVersion }),
+        body: JSON.stringify({ name, slug, shortBio, facebookUrl, imageAssetId, expectedWorkingVersion: artist.workingVersion }),
       });
       await readResult(response);
       setMessage("Draft saved. Published and scheduled snapshots were not changed.");
@@ -103,6 +107,7 @@ export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role:
           {message && <div className="alert success" role="status">{message}</div>}
           {canWrite && artist.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save draft</button></div>}
         </form>
+        <ArtworkPicker value={imageAssetId} assets={mediaAssets} canWrite={canWrite && artist.status !== "ARCHIVED"} onChange={setImageAssetId} />
         {canWrite && <section className="panel publish-panel">
           <div><h2>Publication</h2><p className="muted">Snapshots are frozen. Save the draft before publishing or scheduling.</p></div>
           <div className="button-row wrap">

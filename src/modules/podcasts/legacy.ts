@@ -1,7 +1,8 @@
-import type { PodcastChapterRevision, PodcastEpisodeRevision } from "@/generated/prisma/client";
+import type { MediaAsset, PodcastChapterRevision, PodcastEpisodeRevision } from "@/generated/prisma/client";
 import { isLegacyAuthorized, legacyUnauthorized } from "@/modules/artists/legacy";
 import { formatLegacyDuration } from "@/modules/tracks/duration";
 import { getPublishedPodcastForLegacy, listPublishedPodcastsForLegacy } from "@/modules/podcasts/service";
+import { LegacyMediaSerializer } from "@/modules/media/legacy";
 
 export function legacyPodcastTitle(title: string) {
   return title.startsWith("Steyoyoke ") ? title.slice(10) : title;
@@ -16,20 +17,21 @@ export function legacyPodcastDate(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-export function serializeLegacyPodcast(revision: PodcastEpisodeRevision & { chapters: PodcastChapterRevision[] }, legacyId: number) {
+export function serializeLegacyPodcast(revision: PodcastEpisodeRevision & { chapters: PodcastChapterRevision[]; artworkAsset?: MediaAsset | null }, legacyId: number) {
+  const covers = LegacyMediaSerializer.covers(revision.artworkAsset);
   return {
     id: String(legacyId), title: legacyPodcastTitle(revision.title), description: null, artist: null,
     artist_id: String(revision.primaryArtistLegacyId), secondary_artist_id: revision.secondaryArtistLegacyId === null ? null : String(revision.secondaryArtistLegacyId),
     date: legacyPodcastDate(revision.episodeDate), duration: formatLegacyDuration(revision.durationMs), label: legacyPodcastLabel(revision.labelLegacyValue),
     artist_feature_times: revision.chapters.map((chapter) => ({ duration: formatLegacyDuration(chapter.durationMs), title: chapter.title, id: chapter.legacyReference ?? "", artist: chapter.artist })),
-    cover_download: null, cover_thumbnail_low: null, cover_thumbnail_high: null, cover_low: null, cover_high: null,
+    ...covers,
     podcast_link: null, podcast_link_title: null, genre: null, bpm: null, type: "podcast", low_mp3: null, high_mp3: null,
     itunes_link: null, beatport_link: null, web_link: null, traxsource_link: null, spotify_link: null, soundcloud_link: null,
     file_id: null, artist_name: revision.primaryArtistName,
   };
 }
 
-type Source = { legacyId: number; publishedRevision: (PodcastEpisodeRevision & { chapters: PodcastChapterRevision[] }) | null };
+type Source = { legacyId: number; publishedRevision: (PodcastEpisodeRevision & { chapters: PodcastChapterRevision[]; artworkAsset?: MediaAsset | null }) | null };
 function envelope(episodes: Source[], pagination?: { total: number; limit: string; offset: string }) {
   return {
     ...(pagination ? { total_rows: pagination.total } : {}),

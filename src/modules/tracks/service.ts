@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/authorization";
 import { AppError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { publishTrackSchema, scheduleTrackSchema, trackDraftSchema, trackListSchema, updateTrackSchema, type TrackDraftInput } from "@/modules/tracks/schema";
+import { assertReadyArtwork, auditMediaAttachment } from "@/modules/media/service";
 
 type Tx = Prisma.TransactionClient;
 const urlFields = ["spotifyUrl", "beatportUrl", "traxsourceUrl", "bandcampUrl", "appleMusicUrl", "soundcloudUrl"] as const;
@@ -20,6 +21,7 @@ function draftData(data: ReturnType<typeof trackDraftSchema.parse>) {
     secondaryArtistId: data.secondaryArtistId || null,
     labelId: data.labelId,
     durationMs: data.durationMs ?? null,
+    artworkAssetId: data.artworkAssetId || null,
     ...Object.fromEntries(urlFields.map((field) => [field, nullable(data[field])])),
   };
 }
@@ -59,6 +61,7 @@ async function publicationDependencies(tx: Tx, track: Track) {
 }
 
 async function snapshot(tx: Tx, track: Track, createdById: string): Promise<TrackRevision> {
+  await assertReadyArtwork(tx, track.artworkAssetId, false);
   const dependencies = await publicationDependencies(tx, track);
   const latest = await tx.trackRevision.aggregate({ where: { trackId: track.id }, _max: { revisionNumber: true } });
   return tx.trackRevision.create({
@@ -72,6 +75,7 @@ async function snapshot(tx: Tx, track: Track, createdById: string): Promise<Trac
       secondaryArtistName: dependencies.secondary?.publishedRevision?.name ?? null,
       labelId: dependencies.label.id, labelName: dependencies.label.name, labelLegacyValue: dependencies.label.legacyValue,
       durationMs: track.durationMs,
+      artworkAssetId: track.artworkAssetId,
       ...Object.fromEntries(urlFields.map((field) => [field, track[field]])),
       createdById,
     },
@@ -90,6 +94,7 @@ export async function createTrack(actor: Actor, input: TrackDraftInput) {
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const track = await tx.track.create({ data: { id: crypto.randomUUID(), ...draftData(data) } });
+      await auditMediaAttachment(tx, actor, null, track.artworkAssetId, { contentType: "TRACK", contentId: track.id });
       await audit(tx, track, actor.userId, "CREATE");
       return track;
     });
@@ -109,8 +114,10 @@ export async function updateTrackDraft(actor: Actor, id: string, input: unknown)
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label || (!label.active && label.id !== track.labelId)) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const next = draftData(data);
+      if (data.artworkAssetId === undefined) next.artworkAssetId = track.artworkAssetId;
       const changedFields = Object.keys(next).filter((key) => String(track[key as keyof Track] ?? "") !== String(next[key as keyof typeof next] ?? ""));
       const updated = await tx.track.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
+      await auditMediaAttachment(tx, actor, track.artworkAssetId, updated.artworkAssetId, { contentType: "TRACK", contentId: id });
       await audit(tx, updated, actor.userId, "EDIT", { changedFields, fromWorkingVersion: track.workingVersion, toWorkingVersion: updated.workingVersion });
       return updated;
     });
@@ -169,6 +176,8 @@ export async function runScheduledTrackPublication(now = new Date()) {
       if (!rows[0]) return false;
       const track = await tx.track.findUnique({ where: { id: candidate.id } });
       if (!track?.scheduledRevisionId) return false;
+      const revision = await tx.trackRevision.findUnique({ where: { id: track.scheduledRevisionId }, include: { artworkAsset: true } });
+      if (!revision || (revision.artworkAssetId && revision.artworkAsset?.status !== "READY")) return false;
       const updated = await tx.track.update({ where: { id: track.id }, data: { status: TrackStatus.PUBLISHED, publishedRevisionId: track.scheduledRevisionId, scheduledRevisionId: null, scheduledFor: null } });
       await audit(tx, updated, null, "PUBLISH", { revisionId: track.scheduledRevisionId, scheduled: true }); return true;
     });
@@ -211,7 +220,7 @@ export async function restoreTrack(actor: Actor, id: string) {
 
 export async function getTrack(actor: Actor, id: string) {
   requirePermission(actor, "track:read");
-  const track = await prisma.track.findUnique({ where: { id }, include: { primaryArtist: true, secondaryArtist: true, label: true, publishedRevision: true, scheduledRevision: true, revisions: { orderBy: { revisionNumber: "desc" } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } } } });
+  const track = await prisma.track.findUnique({ where: { id }, include: { primaryArtist: true, secondaryArtist: true, label: true, artworkAsset: true, publishedRevision: { include: { artworkAsset: true } }, scheduledRevision: { include: { artworkAsset: true } }, revisions: { orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } } } });
   if (!track) throw new AppError("Track not found.", 404, "TRACK_NOT_FOUND"); return track;
 }
 
@@ -237,17 +246,17 @@ export async function getTrackPreview(actor: Actor, id: string) {
 
 export async function getLegacyTrackPreview(actor: Actor, id: string) {
   requirePermission(actor, "track:read");
-  const track = await prisma.track.findUnique({ where: { id }, include: { publishedRevision: true } });
+  const track = await prisma.track.findUnique({ where: { id }, include: { publishedRevision: { include: { artworkAsset: true } } } });
   if (!track) throw new AppError("Track not found.", 404, "TRACK_NOT_FOUND");
   return track.publishedRevision && (track.status === TrackStatus.PUBLISHED || track.status === TrackStatus.SCHEDULED) ? track : null;
 }
 
 export async function listPublishedTracksForLegacy(limit?: number, offset = 0) {
   const where: Prisma.TrackWhereInput = { publishedRevisionId: { not: null }, status: { in: [TrackStatus.PUBLISHED, TrackStatus.SCHEDULED] } };
-  const [tracks, total] = await prisma.$transaction([prisma.track.findMany({ where, include: { publishedRevision: true }, orderBy: { legacyId: "desc" }, take: limit, skip: offset }), prisma.track.count({ where })]);
+  const [tracks, total] = await prisma.$transaction([prisma.track.findMany({ where, include: { publishedRevision: { include: { artworkAsset: true } } }, orderBy: { legacyId: "desc" }, take: limit, skip: offset }), prisma.track.count({ where })]);
   return { tracks, total };
 }
 
 export async function getPublishedTrackForLegacy(legacyId: number) {
-  return prisma.track.findFirst({ where: { legacyId, publishedRevisionId: { not: null }, status: { in: [TrackStatus.PUBLISHED, TrackStatus.SCHEDULED] } }, include: { publishedRevision: true } });
+  return prisma.track.findFirst({ where: { legacyId, publishedRevisionId: { not: null }, status: { in: [TrackStatus.PUBLISHED, TrackStatus.SCHEDULED] } }, include: { publishedRevision: { include: { artworkAsset: true } } } });
 }

@@ -3,21 +3,23 @@
 import { useMemo, useState, type DragEvent, type FormEvent } from "react";
 import type { TrackOption } from "@/components/track-create-form";
 import { formatDuration, parseDuration } from "@/modules/tracks/duration";
+import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
 
 export type PodcastChapterData = { id?: string; artist: string; title: string; legacyReference: string | null; durationMs: number | null };
 type Revision = { id: string; revisionNumber: number; sourceWorkingVersion: number; title: string; primaryArtistName: string; labelName: string; chapterCount: number; createdAt: string };
 type Audit = { id: string; action: string; createdAt: string; actor: { name: string } | null };
 export type PodcastEditorData = {
   id: string; legacyId: number; title: string; primaryArtistId: string; secondaryArtistId: string | null; labelId: string; episodeDate: string; durationMs: number | null;
-  status: string; workingVersion: number; scheduledFor: string | null; chapters: PodcastChapterData[]; publishedRevision: Revision | null; scheduledRevision: Revision | null; revisions: Revision[]; auditLogs: Audit[];
+  artworkAssetId: string | null; status: string; workingVersion: number; scheduledFor: string | null; chapters: PodcastChapterData[]; publishedRevision: Revision | null; scheduledRevision: Revision | null; revisions: Revision[]; auditLogs: Audit[];
 };
 type EditableChapter = { key: string; artist: string; title: string; legacyReference: string; duration: string };
 const displayDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
 async function readResult(response: Response) { const body = await response.json(); if (!response.ok) throw new Error(body.error?.message ?? "The operation failed."); return body; }
 
-export function PodcastEditor({ podcast, role, artists, labels, legacyPreview }: { podcast: PodcastEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; legacyPreview: unknown }) {
+export function PodcastEditor({ podcast, role, artists, labels, mediaAssets, legacyPreview }: { podcast: PodcastEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; mediaAssets: ArtworkOption[]; legacyPreview: unknown }) {
   const canWrite = role !== "VIEWER"; const [pending, setPending] = useState(false); const [error, setError] = useState(""); const [artistQuery, setArtistQuery] = useState(""); const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [title, setTitle] = useState(podcast.title); const [primaryArtistId, setPrimaryArtistId] = useState(podcast.primaryArtistId); const [secondaryArtistId, setSecondaryArtistId] = useState(podcast.secondaryArtistId ?? ""); const [labelId, setLabelId] = useState(podcast.labelId); const [episodeDate, setEpisodeDate] = useState(podcast.episodeDate); const [duration, setDuration] = useState(formatDuration(podcast.durationMs) ?? ""); const [scheduledFor, setScheduledFor] = useState("");
+  const [artworkAssetId, setArtworkAssetId] = useState<string | null>(podcast.artworkAssetId);
   const [chapters, setChapters] = useState<EditableChapter[]>(podcast.chapters.map((chapter) => ({ key: chapter.id ?? crypto.randomUUID(), artist: chapter.artist, title: chapter.title, legacyReference: chapter.legacyReference ?? "", duration: formatDuration(chapter.durationMs) ?? "" })));
   const shownArtists = useMemo(() => artists.filter((artist) => artist.name.toLowerCase().includes(artistQuery.toLowerCase()) || artist.id === primaryArtistId || artist.id === secondaryArtistId), [artists, artistQuery, primaryArtistId, secondaryArtistId]);
   const primary = artists.find(({ id }) => id === primaryArtistId); const secondary = artists.find(({ id }) => id === secondaryArtistId); const label = labels.find(({ id }) => id === labelId); const unpublishedChanges = !podcast.publishedRevision || podcast.publishedRevision.sourceWorkingVersion !== podcast.workingVersion;
@@ -29,7 +31,7 @@ export function PodcastEditor({ podcast, role, artists, labels, legacyPreview }:
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setError("");
     try {
-      const core = await readResult(await fetch(`/api/admin/podcasts/${podcast.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, primaryArtistId, secondaryArtistId, labelId, episodeDate, durationMs: parseDuration(duration), expectedWorkingVersion: podcast.workingVersion }) }));
+      const core = await readResult(await fetch(`/api/admin/podcasts/${podcast.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, primaryArtistId, secondaryArtistId, labelId, episodeDate, durationMs: parseDuration(duration), artworkAssetId, expectedWorkingVersion: podcast.workingVersion }) }));
       await readResult(await fetch(`/api/admin/podcasts/${podcast.id}/chapters`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expectedWorkingVersion: core.workingVersion, chapters: chapters.map((chapter, position) => ({ position, artist: chapter.artist, title: chapter.title, legacyReference: chapter.legacyReference, durationMs: parseDuration(chapter.duration) })) }) })); window.location.reload();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save Podcast draft."); setPending(false); }
   }
@@ -54,7 +56,7 @@ export function PodcastEditor({ podcast, role, artists, labels, legacyPreview }:
       </div>)}</div>
       {error && <div className="alert error" role="alert">{error}</div>}{canWrite && podcast.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save Draft</button></div>}
     </form>
-    <section className="panel media-placeholder"><div className="eyebrow">Media</div><h2>Artwork and audio</h2><p className="muted">Temporarily optional in Phase 8. The requirement must be tightened when the MediaAsset pipeline exists.</p></section>
+    <ArtworkPicker value={artworkAssetId} assets={mediaAssets} canWrite={canWrite && podcast.status !== "ARCHIVED"} requiredForPublish onChange={setArtworkAssetId} />
     {canWrite && <section className="panel publish-panel"><h2>Publication</h2><p className="muted">Save first. Publish and schedule freeze the core record and ordered chapters together.</p><div className="button-row wrap">
       {podcast.status !== "ARCHIVED" && <button className="button" disabled={pending} onClick={() => perform("publish", { expectedWorkingVersion: podcast.workingVersion })}>Publish now</button>}{podcast.status === "PUBLISHED" && <button className="button" disabled={pending} onClick={() => perform("unpublish")}>Unpublish</button>}
       {podcast.status !== "ARCHIVED" && podcast.status !== "SCHEDULED" && <><input aria-label="Schedule time" type="datetime-local" value={scheduledFor} onInput={(event) => setScheduledFor(event.currentTarget.value)} /><button className="button" disabled={pending || !scheduledFor} onClick={() => perform("schedule", { scheduledFor: new Date(scheduledFor).toISOString(), expectedWorkingVersion: podcast.workingVersion })}>Schedule</button></>}

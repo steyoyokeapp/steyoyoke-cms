@@ -33,6 +33,34 @@ enum AuditAction {
   UNPUBLISH
   ARCHIVE
   RESTORE
+  MEDIA_UPLOAD
+  MEDIA_ATTACH
+  MEDIA_REPLACE
+  MEDIA_DETACH
+  MEDIA_RETIRE
+  MEDIA_PURGE
+}
+
+enum MediaKind {
+  IMAGE
+}
+
+enum MediaStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  QUARANTINED
+  RETIRED
+}
+
+enum MediaVariantKey {
+  ORIGINAL
+  LEGACY_1440
+  LEGACY_1024
+  LEGACY_512
+  LEGACY_THUMB_256
+  LEGACY_THUMB_80
 }
 
 enum TrackStatus {
@@ -78,6 +106,8 @@ model User {
   podcastAuditLogs PodcastAuditLog[]
   releaseRevisions ReleaseRevision[]
   releaseAuditLogs ReleaseAuditLog[]
+  createdMedia     MediaAsset[]
+  mediaAuditLogs   MediaAuditLog[]
 
   @@map("users")
 }
@@ -137,6 +167,7 @@ model Artist {
   slug                      String                   @unique
   shortBio                  String?
   facebookUrl               String?
+  imageAssetId              String?                  @db.Uuid
   status                    ArtistStatus             @default(DRAFT)
   workingVersion            Int                      @default(1)
   publishedRevisionId       String?                  @db.Uuid
@@ -161,31 +192,36 @@ model Artist {
   secondaryReleases         Release[]                @relation("ReleaseSecondaryArtist")
   primaryReleaseRevisions   ReleaseRevision[]        @relation("ReleaseRevisionPrimaryArtist")
   secondaryReleaseRevisions ReleaseRevision[]        @relation("ReleaseRevisionSecondaryArtist")
+  imageAsset                MediaAsset?              @relation("ArtistImage", fields: [imageAssetId], references: [id], onDelete: Restrict)
 
   @@index([status])
   @@index([scheduledFor])
+  @@index([imageAssetId])
   @@map("artists")
 }
 
 model ArtistRevision {
-  id                   String   @id @default(uuid()) @db.Uuid
-  artistId             String   @db.Uuid
+  id                   String      @id @default(uuid()) @db.Uuid
+  artistId             String      @db.Uuid
   revisionNumber       Int
   sourceWorkingVersion Int
   name                 String
   slug                 String
   shortBio             String?
   facebookUrl          String?
-  createdById          String   @db.Uuid
-  createdAt            DateTime @default(now()) @db.Timestamptz(6)
-  artist               Artist   @relation("ArtistRevisions", fields: [artistId], references: [id], onDelete: Restrict)
-  createdBy            User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  publishedByArtists   Artist[] @relation("PublishedRevision")
-  scheduledForArtists  Artist[] @relation("ScheduledRevision")
+  imageAssetId         String?     @db.Uuid
+  createdById          String      @db.Uuid
+  createdAt            DateTime    @default(now()) @db.Timestamptz(6)
+  artist               Artist      @relation("ArtistRevisions", fields: [artistId], references: [id], onDelete: Restrict)
+  createdBy            User        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  publishedByArtists   Artist[]    @relation("PublishedRevision")
+  scheduledForArtists  Artist[]    @relation("ScheduledRevision")
+  imageAsset           MediaAsset? @relation("ArtistRevisionImage", fields: [imageAssetId], references: [id], onDelete: Restrict)
 
   @@unique([artistId, revisionNumber])
   @@unique([artistId, id])
   @@index([createdById])
+  @@index([imageAssetId])
   @@map("artist_revisions")
 }
 
@@ -236,6 +272,7 @@ model Track {
   bandcampUrl         String?
   appleMusicUrl       String?
   soundcloudUrl       String?
+  artworkAssetId      String?         @db.Uuid
   status              TrackStatus     @default(DRAFT)
   workingVersion      Int             @default(1)
   publishedRevisionId String?         @db.Uuid
@@ -252,12 +289,14 @@ model Track {
   scheduledRevision   TrackRevision?  @relation("ScheduledTrackRevision", fields: [id, scheduledRevisionId], references: [trackId, id], onDelete: Restrict)
   auditLogs           TrackAuditLog[]
   releaseTracks       ReleaseTrack[]
+  artworkAsset        MediaAsset?     @relation("TrackArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
 
   @@index([primaryArtistId])
   @@index([secondaryArtistId])
   @@index([labelId])
   @@index([status])
   @@index([scheduledFor])
+  @@index([artworkAssetId])
   @@map("tracks")
 }
 
@@ -283,6 +322,7 @@ model TrackRevision {
   bandcampUrl             String?
   appleMusicUrl           String?
   soundcloudUrl           String?
+  artworkAssetId          String?                @db.Uuid
   createdById             String                 @db.Uuid
   createdAt               DateTime               @default(now()) @db.Timestamptz(6)
   track                   Track                  @relation("TrackRevisions", fields: [trackId], references: [id], onDelete: Restrict)
@@ -293,6 +333,7 @@ model TrackRevision {
   publishedByTracks       Track[]                @relation("PublishedTrackRevision")
   scheduledForTracks      Track[]                @relation("ScheduledTrackRevision")
   releaseRevisionTracks   ReleaseRevisionTrack[]
+  artworkAsset            MediaAsset?            @relation("TrackRevisionArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
 
   @@unique([trackId, revisionNumber])
   @@unique([trackId, id])
@@ -300,6 +341,7 @@ model TrackRevision {
   @@index([secondaryArtistId])
   @@index([labelId])
   @@index([createdById])
+  @@index([artworkAssetId])
   @@map("track_revisions")
 }
 
@@ -327,6 +369,7 @@ model PodcastEpisode {
   labelId             String                   @db.Uuid
   episodeDate         DateTime?                @db.Date
   durationMs          Int?
+  artworkAssetId      String?                  @db.Uuid
   status              PodcastStatus            @default(DRAFT)
   workingVersion      Int                      @default(1)
   publishedRevisionId String?                  @db.Uuid
@@ -343,6 +386,7 @@ model PodcastEpisode {
   publishedRevision   PodcastEpisodeRevision?  @relation("PublishedPodcastRevision", fields: [id, publishedRevisionId], references: [episodeId, id], onDelete: Restrict)
   scheduledRevision   PodcastEpisodeRevision?  @relation("ScheduledPodcastRevision", fields: [id, scheduledRevisionId], references: [episodeId, id], onDelete: Restrict)
   auditLogs           PodcastAuditLog[]
+  artworkAsset        MediaAsset?              @relation("PodcastArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
 
   @@index([primaryArtistId])
   @@index([secondaryArtistId])
@@ -350,6 +394,7 @@ model PodcastEpisode {
   @@index([episodeDate])
   @@index([status])
   @@index([scheduledFor])
+  @@index([artworkAssetId])
   @@map("podcast_episodes")
 }
 
@@ -387,6 +432,7 @@ model PodcastEpisodeRevision {
   labelLegacyValue        String
   episodeDate             DateTime                 @db.Date
   durationMs              Int?
+  artworkAssetId          String?                  @db.Uuid
   createdById             String                   @db.Uuid
   createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
   episode                 PodcastEpisode           @relation("PodcastRevisions", fields: [episodeId], references: [id], onDelete: Restrict)
@@ -397,6 +443,7 @@ model PodcastEpisodeRevision {
   chapters                PodcastChapterRevision[]
   publishedByEpisodes     PodcastEpisode[]         @relation("PublishedPodcastRevision")
   scheduledForEpisodes    PodcastEpisode[]         @relation("ScheduledPodcastRevision")
+  artworkAsset            MediaAsset?              @relation("PodcastRevisionArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
 
   @@unique([episodeId, revisionNumber])
   @@unique([episodeId, id])
@@ -404,6 +451,7 @@ model PodcastEpisodeRevision {
   @@index([secondaryArtistId])
   @@index([labelId])
   @@index([createdById])
+  @@index([artworkAssetId])
   @@map("podcast_episode_revisions")
 }
 
@@ -452,6 +500,7 @@ model Release {
   bandcampUrl         String?
   appleMusicUrl       String?
   soundcloudUrl       String?
+  artworkAssetId      String?           @db.Uuid
   status              ReleaseStatus     @default(DRAFT)
   workingVersion      Int               @default(1)
   publishedRevisionId String?           @db.Uuid
@@ -468,6 +517,7 @@ model Release {
   publishedRevision   ReleaseRevision?  @relation("PublishedReleaseRevision", fields: [id, publishedRevisionId], references: [releaseId, id], onDelete: Restrict)
   scheduledRevision   ReleaseRevision?  @relation("ScheduledReleaseRevision", fields: [id, scheduledRevisionId], references: [releaseId, id], onDelete: Restrict)
   auditLogs           ReleaseAuditLog[]
+  artworkAsset        MediaAsset?       @relation("ReleaseArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
 
   @@index([primaryArtistId])
   @@index([secondaryArtistId])
@@ -475,6 +525,7 @@ model Release {
   @@index([releaseDate])
   @@index([status])
   @@index([scheduledFor])
+  @@index([artworkAssetId])
   @@map("releases")
 }
 
@@ -516,6 +567,7 @@ model ReleaseRevision {
   bandcampUrl             String?
   appleMusicUrl           String?
   soundcloudUrl           String?
+  artworkAssetId          String?                @db.Uuid
   createdById             String                 @db.Uuid
   createdAt               DateTime               @default(now()) @db.Timestamptz(6)
   release                 Release                @relation("ReleaseRevisions", fields: [releaseId], references: [id], onDelete: Restrict)
@@ -524,6 +576,7 @@ model ReleaseRevision {
   label                   Label                  @relation(fields: [labelId], references: [id], onDelete: Restrict)
   createdBy               User                   @relation(fields: [createdById], references: [id], onDelete: Restrict)
   tracks                  ReleaseRevisionTrack[]
+  artworkAsset            MediaAsset?            @relation("ReleaseRevisionArtwork", fields: [artworkAssetId], references: [id], onDelete: Restrict)
   publishedByReleases     Release[]              @relation("PublishedReleaseRevision")
   scheduledForReleases    Release[]              @relation("ScheduledReleaseRevision")
 
@@ -533,6 +586,7 @@ model ReleaseRevision {
   @@index([secondaryArtistId])
   @@index([labelId])
   @@index([createdById])
+  @@index([artworkAssetId])
   @@map("release_revisions")
 }
 
@@ -563,4 +617,74 @@ model ReleaseAuditLog {
   @@index([releaseId, createdAt])
   @@index([actorId])
   @@map("release_audit_logs")
+}
+
+model MediaAsset {
+  id                     String                   @id @default(uuid()) @db.Uuid
+  kind                   MediaKind                @default(IMAGE)
+  status                 MediaStatus              @default(UPLOADING)
+  provider               String                   @default("LOCAL")
+  sourceStorageKey       String                   @unique
+  compatibilityFilename  String                   @unique
+  originalFilename       String
+  mimeType               String
+  byteSize               Int
+  sha256Checksum         String
+  width                  Int
+  height                 Int
+  createdById            String                   @db.Uuid
+  failureReason          String?
+  unreferencedAt         DateTime?                @db.Timestamptz(6)
+  retiredAt              DateTime?                @db.Timestamptz(6)
+  createdAt              DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                 @updatedAt @db.Timestamptz(6)
+  createdBy              User                     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  variants               MediaVariant[]
+  auditLogs              MediaAuditLog[]
+  artistImages           Artist[]                 @relation("ArtistImage")
+  artistRevisionImages   ArtistRevision[]         @relation("ArtistRevisionImage")
+  trackArtwork           Track[]                  @relation("TrackArtwork")
+  trackRevisionArtwork   TrackRevision[]          @relation("TrackRevisionArtwork")
+  podcastArtwork         PodcastEpisode[]         @relation("PodcastArtwork")
+  podcastRevisionArtwork PodcastEpisodeRevision[] @relation("PodcastRevisionArtwork")
+  releaseArtwork         Release[]                @relation("ReleaseArtwork")
+  releaseRevisionArtwork ReleaseRevision[]        @relation("ReleaseRevisionArtwork")
+
+  @@index([status, createdAt])
+  @@index([unreferencedAt])
+  @@index([createdById])
+  @@map("media_assets")
+}
+
+model MediaVariant {
+  id             String          @id @default(uuid()) @db.Uuid
+  mediaAssetId   String          @db.Uuid
+  variantKey     MediaVariantKey
+  storageKey     String          @unique
+  mimeType       String
+  byteSize       Int
+  sha256Checksum String
+  width          Int
+  height         Int
+  createdAt      DateTime        @default(now()) @db.Timestamptz(6)
+  mediaAsset     MediaAsset      @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([mediaAssetId, variantKey])
+  @@index([mediaAssetId])
+  @@map("media_variants")
+}
+
+model MediaAuditLog {
+  id           String      @id @default(uuid()) @db.Uuid
+  mediaAssetId String?     @db.Uuid
+  actorId      String?     @db.Uuid
+  action       AuditAction
+  metadata     Json?
+  createdAt    DateTime    @default(now()) @db.Timestamptz(6)
+  mediaAsset   MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  actor        User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([mediaAssetId, createdAt])
+  @@index([actorId])
+  @@map("media_audit_logs")
 }

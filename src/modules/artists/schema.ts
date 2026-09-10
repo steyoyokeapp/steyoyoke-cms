@@ -7,6 +7,7 @@ export const artistDraftSchema = z.object({
   slug: z.string().trim().max(180).optional(),
   shortBio: z.string().trim().max(2_000).optional().nullable(),
   facebookUrl: nullableUrl,
+  imageAssetId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
 });
 
 export const updateArtistSchema = artistDraftSchema.extend({

@@ -6,18 +6,19 @@ import { handleLegacyReleaseRequest } from "@/modules/releases/legacy";
 import { archiveRelease, cancelReleaseSchedule, createRelease, getLegacyReleaseCompletePreview, getLegacyReleasePreview, getRelease, getReleasePreview, publishRelease, reorderReleaseTracks, replaceReleaseTracks, restoreRelease, runScheduledReleasePublication, scheduleRelease, unpublishRelease, updateReleaseDraft } from "@/modules/releases/service";
 import { createTrack, publishTrack, updateTrackDraft } from "@/modules/tracks/service";
 
-let editor: Actor; let viewer: Actor; let labelId: string;
+let editor: Actor; let viewer: Actor; let labelId: string; let artworkAssetId: string;
 beforeEach(async () => {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "release_audit_logs", "release_revision_tracks", "release_revisions", "release_tracks", "releases", "podcast_audit_logs", "podcast_chapter_revisions", "podcast_episode_revisions", "podcast_chapters", "podcast_episodes", "track_audit_logs", "track_revisions", "tracks", "audit_logs", "artist_revisions", "artists", "accounts", "sessions", "verifications", "users", "labels" RESTART IDENTITY CASCADE');
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "media_audit_logs", "media_variants", "media_assets", "release_audit_logs", "release_revision_tracks", "release_revisions", "release_tracks", "releases", "podcast_audit_logs", "podcast_chapter_revisions", "podcast_episode_revisions", "podcast_chapters", "podcast_episodes", "track_audit_logs", "track_revisions", "tracks", "audit_logs", "artist_revisions", "artists", "accounts", "sessions", "verifications", "users", "labels" RESTART IDENTITY CASCADE');
   const [editorUser, viewerUser] = await Promise.all([prisma.user.create({ data: { name: "Editor", email: "release-editor@test.local", role: "EDITOR", emailVerified: true } }), prisma.user.create({ data: { name: "Viewer", email: "release-viewer@test.local", role: "VIEWER", emailVerified: true } })]);
   editor = { userId: editorUser.id, role: "EDITOR" }; viewer = { userId: viewerUser.id, role: "VIEWER" };
+  artworkAssetId = (await prisma.mediaAsset.create({ data: { kind: "IMAGE", status: "READY", provider: "LOCAL", sourceStorageKey: `tests/${crypto.randomUUID()}.jpg`, compatibilityFilename: `${crypto.randomUUID()}.jpg`, originalFilename: "test.jpg", mimeType: "image/jpeg", byteSize: 3, sha256Checksum: "a".repeat(64), width: 1, height: 1, createdById: editor.userId } })).id;
   labelId = (await prisma.label.create({ data: { name: "Steyoyoke Black", slug: "steyoyoke-black", legacyValue: "STEYOYOKE_BLACK" } })).id;
 });
 afterAll(async () => prisma.$disconnect());
 
 async function artist(name = "Release Artist", publish = true) { const value = await createArtist(editor, { name }); if (publish) await publishArtist(editor, value.id, { expectedWorkingVersion: 1 }); return value; }
 async function track(primaryArtistId: string, title: string, publish = true) { const value = await createTrack(editor, { title, primaryArtistId, labelId, durationMs: 225000 }); if (publish) await publishTrack(editor, value.id, { expectedWorkingVersion: 1 }); return value; }
-async function release(primaryArtistId: string, title = "Steyoyoke Release One", secondaryArtistId?: string) { return createRelease(editor, { title, primaryArtistId, secondaryArtistId, labelId, releaseDate: "2026-07-08", bandcampUrl: "https://example.test/release" }); }
+async function release(primaryArtistId: string, title = "Steyoyoke Release One", secondaryArtistId?: string) { return createRelease(editor, { title, primaryArtistId, secondaryArtistId, labelId, releaseDate: "2026-07-08", bandcampUrl: "https://example.test/release", artworkAssetId }); }
 const request = (filter: string, legacyId?: number, query = "") => new Request(`http://local/index.php/cms/api${legacyId === undefined ? "" : `/${legacyId}`}?filter=${filter}${query}`, { headers: { "X-Csrf-Token": process.env.LEGACY_API_KEY_A! } });
 
 describe("Release publication service", () => {

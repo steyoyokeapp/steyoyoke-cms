@@ -4,6 +4,7 @@ import {
   getPublishedArtistForLegacy,
   listPublishedArtistsForLegacy,
 } from "@/modules/artists/service";
+import { LegacyMediaSerializer } from "@/modules/media/legacy";
 
 type LegacySource = Awaited<ReturnType<typeof listPublishedArtistsForLegacy>>[number];
 
@@ -13,7 +14,7 @@ export function serializeLegacyArtist(artist: LegacySource) {
   return {
     id: String(artist.legacyId),
     name: revision.name,
-    image: null,
+    image: LegacyMediaSerializer.path(revision.imageAsset, "LEGACY_1440"),
     facebook_url: revision.facebookUrl,
     description_short: revision.shortBio,
     priority: null,

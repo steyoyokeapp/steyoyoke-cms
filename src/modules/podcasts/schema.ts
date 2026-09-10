@@ -10,6 +10,7 @@ export const podcastDraftSchema = z.object({
   labelId: z.uuid(),
   episodeDate: optionalDate,
   durationMs: z.number().int().nonnegative().nullable().optional(),
+  artworkAssetId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
 }).superRefine((value, context) => {
   if (value.secondaryArtistId && value.primaryArtistId === value.secondaryArtistId) {
     context.addIssue({ code: "custom", path: ["secondaryArtistId"], message: "Secondary Artist must differ from Primary Artist." });
