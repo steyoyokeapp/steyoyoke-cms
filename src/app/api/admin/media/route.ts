@@ -13,6 +13,7 @@ export async function POST(request: Request) {
     requireTrustedMutation(request); const actor = await actorFromHeaders(request.headers); const data = await request.formData(); const file = data.get("file");
     if (!(file instanceof File)) return Response.json({ error: { code: "FILE_REQUIRED", message: "Choose a media file." } }, { status: 422 });
     const input = { name: file.name, bytes: Buffer.from(await file.arrayBuffer()) };
-    return Response.json(data.get("kind") === "AUDIO" ? await createAndProcessAudio(actor, input) : await createAndProcessImage(actor, input), { status: 201 });
+    const requestId = [request.headers.get("x-vercel-id"), request.headers.get("x-request-id")].find((value) => value && /^[a-zA-Z0-9._:/-]{1,200}$/.test(value)) ?? undefined;
+    return Response.json(data.get("kind") === "AUDIO" ? await createAndProcessAudio(actor, input) : await createAndProcessImage(actor, input, undefined, { requestId }), { status: 201 });
   } catch (error) { return errorResponse(error); }
 }

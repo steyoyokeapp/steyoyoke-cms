@@ -4,6 +4,7 @@ import { MediaStatus } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/authorization";
 import { requirePermission } from "@/lib/authorization";
 import { AppError } from "@/lib/errors";
+import { logSafeError } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { processImage } from "@/modules/media/image";
 import { processAudio } from "@/modules/media/audio";
@@ -12,15 +13,20 @@ import { mediaStorage, type StorageProvider } from "@/modules/media/storage";
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 type Db = Prisma.TransactionClient | typeof prisma;
 
-export async function createAndProcessImage(actor: Actor, file: { name: string; bytes: Buffer }, storage: StorageProvider = mediaStorage) {
+type UploadDiagnostics = { requestId?: string };
+
+export async function createAndProcessImage(actor: Actor, file: { name: string; bytes: Buffer }, storage: StorageProvider = mediaStorage, diagnostics: UploadDiagnostics = {}) {
   requirePermission(actor, "media:upload");
   const id = crypto.randomUUID();
+  let failureKind = "processing";
+  let failureStage = "process_image";
   try {
     const processed = await processImage(file.bytes);
     const original = processed.variants[0]!;
     const sourceExtension = processed.sourceFormat === "jpeg" ? "jpg" : processed.sourceFormat;
     const sourceStorageKey = `images/${id}/source.${sourceExtension}`;
     const compatibilityFilename = `${id}.${original.extension}`;
+    failureKind = "database"; failureStage = "create_media_asset";
     const asset = await prisma.mediaAsset.create({ data: {
       id, kind: "IMAGE", status: "PROCESSING", provider: storage.kind, sourceStorageKey, compatibilityFilename,
       originalFilename: file.name.slice(0, 255) || "upload", mimeType: original.mimeType, byteSize: file.bytes.length,
@@ -28,13 +34,16 @@ export async function createAndProcessImage(actor: Actor, file: { name: string; 
     } });
     const written: string[] = [];
     try {
+      failureKind = "storage"; failureStage = "write_source";
       await storage.put(sourceStorageKey, file.bytes); written.push(sourceStorageKey);
       const variantData: Prisma.MediaVariantCreateManyInput[] = [];
       for (const variant of processed.variants) {
         const storageKey = `images/${id}/${variant.variantKey.toLowerCase().replaceAll("_", "-")}.${variant.extension}`;
+        failureStage = "write_variant";
         await storage.put(storageKey, variant.bytes); written.push(storageKey);
         variantData.push({ id: crypto.randomUUID(), mediaAssetId: id, variantKey: variant.variantKey, storageKey, mimeType: variant.mimeType, byteSize: variant.bytes.length, sha256Checksum: variant.sha256Checksum, width: variant.width, height: variant.height });
       }
+      failureKind = "database"; failureStage = "finalize_media_asset";
       return await prisma.$transaction(async (tx) => {
         await tx.mediaVariant.createMany({ data: variantData });
         const ready = await tx.mediaAsset.update({ where: { id }, data: { status: "READY", unreferencedAt: new Date() }, include: { variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
@@ -42,12 +51,17 @@ export async function createAndProcessImage(actor: Actor, file: { name: string; 
         return ready;
       });
     } catch (error) {
-      await Promise.all(written.map((key) => storage.delete(key)));
-      await prisma.mediaAsset.update({ where: { id: asset.id }, data: { status: "FAILED", failureReason: "Image processing or local storage failed." } });
+      const cleanup = await Promise.allSettled([
+        ...written.map((key) => storage.delete(key)),
+        prisma.mediaAsset.update({ where: { id: asset.id }, data: { status: "FAILED", failureReason: "Image processing or local storage failed." } }),
+      ]);
+      const cleanupFailure = cleanup.find((result) => result.status === "rejected");
+      if (cleanupFailure?.status === "rejected") logSafeError("media_image_upload_cleanup_failed", cleanupFailure.reason, { requestId: diagnostics.requestId, operation: "image upload", mediaAssetId: id, storageProvider: storage.kind });
       throw error;
     }
   } catch (error) {
     if (error instanceof AppError) throw error;
+    logSafeError("media_image_upload_failed", error, { requestId: diagnostics.requestId, operation: "image upload", failureKind, failureStage, mediaAssetId: id, storageProvider: storage.kind });
     throw new AppError("Image upload failed cleanly.", 422, "IMAGE_UPLOAD_FAILED");
   }
 }

@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "@/lib/authorization";
 import { prisma } from "@/lib/prisma";
 import { createArtist, getArtist, publishArtist, updateArtistDraft } from "@/modules/artists/service";
@@ -42,6 +42,18 @@ describe("media service and frozen artwork references", () => {
 
   it("rejects corrupt uploads without partial READY state", async () => {
     await expect(createAndProcessImage(editor, { name: "fake.jpg", bytes: Buffer.from("not-image") }, new MemoryStorage())).rejects.toMatchObject({ code: "IMAGE_INVALID" }); expect(await prisma.mediaAsset.count()).toBe(0);
+  });
+
+  it("logs an unexpected storage failure with safe request and stage context", async () => {
+    const output = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const storage = new MemoryStorage(); storage.put = async () => { throw new Error("S3 write denied"); };
+    await expect(createAndProcessImage(editor, { name: "artwork.jpg", bytes: image }, storage, { requestId: "iad1::media-test" })).rejects.toMatchObject({ code: "IMAGE_UPLOAD_FAILED", message: "Image upload failed cleanly." });
+
+    const record = JSON.parse(String(output.mock.calls.find(([line]) => String(line).includes("media_image_upload_failed"))?.[0]));
+    expect(record).toMatchObject({ event: "media_image_upload_failed", requestId: "iad1::media-test", operation: "image upload", failureKind: "storage", failureStage: "write_source", storageProvider: "LOCAL", errorName: "Error", errorMessage: "S3 write denied" });
+    expect(record).not.toHaveProperty("bytes");
+    expect(await prisma.mediaAsset.findFirst()).toMatchObject({ status: "FAILED", failureReason: "Image processing or local storage failed." });
+    output.mockRestore();
   });
 
   it("delivers only known virtual legacy variants with immutable cache headers", async () => {
