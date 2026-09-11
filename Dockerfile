@@ -11,7 +11,7 @@ ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
     BETTER_AUTH_URL=http://127.0.0.1:3000 \
     LEGACY_API_KEY_A=build-only-key-a \
     LEGACY_API_KEY_B=build-only-key-b
-RUN npm run db:generate && npm run build
+RUN npm run build
 
 FROM dependencies AS migrate
 COPY prisma ./prisma
