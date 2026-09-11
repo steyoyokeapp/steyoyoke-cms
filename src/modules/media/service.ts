@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/authorization";
 import { AppError } from "@/lib/errors";
 import { log, logSafeError } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { processImage } from "@/modules/media/image";
+import { inspectImage } from "@/modules/media/image";
 import { processAudio } from "@/modules/media/audio";
 import { mediaStorage, type StorageProvider } from "@/modules/media/storage";
 
@@ -21,74 +21,56 @@ export async function createAndProcessImage(actor: Actor, file: { name: string; 
   requirePermission(actor, "media:upload");
   const uploadStartedAtMs = diagnostics.requestStartedAtMs ?? performance.now();
   const id = crypto.randomUUID();
-  let failureKind = "processing";
-  let failureStage = "process_image";
+  let failureKind = "validation";
+  let failureStage = "inspect_source";
+  let assetCreated = false;
+  let sourceStored = false;
+  let sourceStorageKey: string | null = null;
   try {
-    const processed = await processImage(file.bytes);
-    const original = processed.variants[0]!;
-    const sourceExtension = processed.sourceFormat === "jpeg" ? "jpg" : processed.sourceFormat;
-    const sourceStorageKey = `images/${id}/source.${sourceExtension}`;
-    const compatibilityFilename = `${id}.${original.extension}`;
+    const inspected = await inspectImage(file.bytes);
+    const outputExtension = inspected.hasAlpha ? "png" : "jpg";
+    const outputMimeType = inspected.hasAlpha ? "image/png" : "image/jpeg";
+    const sourceExtension = inspected.sourceFormat === "jpeg" ? "jpg" : inspected.sourceFormat;
+    sourceStorageKey = `images/${id}/source.${sourceExtension}`;
+    const compatibilityFilename = `${id}.${outputExtension}`;
     failureKind = "database"; failureStage = "create_media_asset";
     const dbCreateStartedAtMs = performance.now();
     const asset = await prisma.mediaAsset.create({ data: {
       id, kind: "IMAGE", status: "PROCESSING", provider: storage.kind, sourceStorageKey, compatibilityFilename,
-      originalFilename: file.name.slice(0, 255) || "upload", mimeType: original.mimeType, byteSize: file.bytes.length,
-      sha256Checksum: processed.sourceChecksum, width: processed.sourceWidth, height: processed.sourceHeight, createdById: actor.userId,
-    } });
+      originalFilename: file.name.slice(0, 255) || "upload", mimeType: outputMimeType, byteSize: file.bytes.length,
+      sha256Checksum: inspected.sourceChecksum, width: inspected.sourceWidth, height: inspected.sourceHeight, createdById: actor.userId,
+    }, include: { variants: true, createdBy: { select: { id: true, name: true } } } });
+    assetCreated = true;
     const dbCreateMs = performance.now() - dbCreateStartedAtMs;
-    const written: string[] = [];
-    try {
-      failureKind = "storage"; failureStage = "write_source";
-      const sourceWriteStartedAtMs = performance.now();
-      await storage.put(sourceStorageKey, file.bytes); written.push(sourceStorageKey);
-      const sourceWriteMs = performance.now() - sourceWriteStartedAtMs;
-      const variantData: Prisma.MediaVariantCreateManyInput[] = [];
-      const variantWriteTimings: Array<{ variantKey: string; writeMs: number }> = [];
-      for (const variant of processed.variants) {
-        const storageKey = `images/${id}/${variant.variantKey.toLowerCase().replaceAll("_", "-")}.${variant.extension}`;
-        failureStage = "write_variant";
-        const variantWriteStartedAtMs = performance.now();
-        await storage.put(storageKey, variant.bytes); written.push(storageKey);
-        variantWriteTimings.push({ variantKey: variant.variantKey, writeMs: performance.now() - variantWriteStartedAtMs });
-        variantData.push({ id: crypto.randomUUID(), mediaAssetId: id, variantKey: variant.variantKey, storageKey, mimeType: variant.mimeType, byteSize: variant.bytes.length, sha256Checksum: variant.sha256Checksum, width: variant.width, height: variant.height });
-      }
-      failureKind = "database"; failureStage = "finalize_media_asset";
-      let dbVariantWriteMs = 0;
-      const finalizeStartedAtMs = performance.now();
-      const ready = await prisma.$transaction(async (tx) => {
-        const dbVariantWriteStartedAtMs = performance.now();
-        await tx.mediaVariant.createMany({ data: variantData });
-        dbVariantWriteMs = performance.now() - dbVariantWriteStartedAtMs;
-        const ready = await tx.mediaAsset.update({ where: { id }, data: { status: "READY", unreferencedAt: new Date() }, include: { variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
-        await tx.mediaAuditLog.create({ data: { mediaAssetId: id, actorId: actor.userId, action: "MEDIA_UPLOAD", metadata: { kind: "IMAGE", originalFilename: ready.originalFilename, byteSize: ready.byteSize } } });
-        return ready;
-      });
-      const finalizeMs = performance.now() - finalizeStartedAtMs;
-      const storageWriteMs = sourceWriteMs + variantWriteTimings.reduce((sum, timing) => sum + timing.writeMs, 0);
-      log("info", "media_image_upload_profile", {
-        requestId: diagnostics.requestId, operation: "image upload", storageProvider: storage.kind,
-        totalMs: milliseconds(performance.now() - uploadStartedAtMs), parseMs: milliseconds(diagnostics.parseMs ?? 0),
-        dbCreateMs: milliseconds(dbCreateMs), imageProcessingMs: milliseconds(processed.profile.imageProcessingMs),
-        metadataMs: milliseconds(processed.profile.metadataMs), variantProcessingMs: milliseconds(processed.profile.variantProcessingMs),
-        storageWriteMs: milliseconds(storageWriteMs), s3WriteMs: storage.kind === "S3_COMPATIBLE" ? milliseconds(storageWriteMs) : undefined,
-        sourceWriteMs: milliseconds(sourceWriteMs), dbVariantWriteMs: milliseconds(dbVariantWriteMs), finalizeMs: milliseconds(finalizeMs),
-        variantCount: processed.variants.length, inputByteSize: file.bytes.length, inputWidth: processed.sourceWidth, inputHeight: processed.sourceHeight,
-        ...Object.fromEntries(processed.profile.variants.map((timing) => [`variantProcessingMs_${timing.variantKey}`, milliseconds(timing.processingMs)])),
-        ...Object.fromEntries(variantWriteTimings.map((timing) => [`variantStorageWriteMs_${timing.variantKey}`, milliseconds(timing.writeMs)])),
-      });
-      return ready;
-    } catch (error) {
-      const cleanup = await Promise.allSettled([
-        ...written.map((key) => storage.delete(key)),
-        prisma.mediaAsset.update({ where: { id: asset.id }, data: { status: "FAILED", failureReason: "Image processing or local storage failed." } }),
-      ]);
-      const cleanupFailure = cleanup.find((result) => result.status === "rejected");
-      if (cleanupFailure?.status === "rejected") logSafeError("media_image_upload_cleanup_failed", cleanupFailure.reason, { requestId: diagnostics.requestId, operation: "image upload", mediaAssetId: id, storageProvider: storage.kind });
-      throw error;
-    }
+    failureKind = "storage"; failureStage = "write_source";
+    const sourceWriteStartedAtMs = performance.now();
+    await storage.put(sourceStorageKey, file.bytes);
+    sourceStored = true;
+    const sourceWriteMs = performance.now() - sourceWriteStartedAtMs;
+    failureKind = "database"; failureStage = "enqueue_processing";
+    const enqueueStartedAtMs = performance.now();
+    await prisma.$transaction(async (tx) => {
+      await tx.mediaProcessingJob.create({ data: { mediaAssetId: id } });
+      await tx.mediaAuditLog.create({ data: { mediaAssetId: id, actorId: actor.userId, action: "MEDIA_UPLOAD", metadata: { kind: "IMAGE", status: "PROCESSING", byteSize: file.bytes.length } } });
+    });
+    const enqueueMs = performance.now() - enqueueStartedAtMs;
+    log("info", "media_image_ingest_profile", {
+      requestId: diagnostics.requestId, operation: "image ingest", storageProvider: storage.kind,
+      totalMs: milliseconds(performance.now() - uploadStartedAtMs), parseMs: milliseconds(diagnostics.parseMs ?? 0),
+      validationMs: milliseconds(inspected.inspectionMs), dbCreateMs: milliseconds(dbCreateMs), sourceWriteMs: milliseconds(sourceWriteMs),
+      enqueueMs: milliseconds(enqueueMs), inputByteSize: file.bytes.length, inputWidth: inspected.sourceWidth, inputHeight: inspected.sourceHeight,
+    });
+    return asset;
   } catch (error) {
     if (error instanceof AppError) throw error;
+    if (assetCreated) {
+      const cleanup = await Promise.allSettled([
+        ...(!sourceStored && sourceStorageKey ? [storage.delete(sourceStorageKey)] : []),
+        prisma.mediaAsset.update({ where: { id }, data: { status: "FAILED", failureReason: sourceStored ? "Image processing could not be queued." : "Image source ingest failed." } }),
+      ]);
+      const cleanupFailure = cleanup.find((result) => result.status === "rejected");
+      if (cleanupFailure?.status === "rejected") logSafeError("media_image_ingest_cleanup_failed", cleanupFailure.reason, { requestId: diagnostics.requestId, operation: "image ingest", mediaAssetId: id, storageProvider: storage.kind });
+    }
     logSafeError("media_image_upload_failed", error, { requestId: diagnostics.requestId, operation: "image upload", failureKind, failureStage, mediaAssetId: id, storageProvider: storage.kind });
     throw new AppError("Image upload failed cleanly.", 422, "IMAGE_UPLOAD_FAILED");
   }
@@ -114,6 +96,32 @@ export async function getMediaAsset(actor: Actor, id: string) {
   const asset = await prisma.mediaAsset.findUnique({ where: { id }, include: { variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
   if (!asset) throw new AppError("Media asset not found.", 404, "MEDIA_NOT_FOUND");
   return { ...asset, references: await getMediaReferences(actor, id) };
+}
+
+export async function readMediaSource(actor: Actor, id: string, storage: StorageProvider = mediaStorage) {
+  requirePermission(actor, "media:read");
+  const asset = await prisma.mediaAsset.findUnique({ where: { id } });
+  if (!asset || asset.kind !== "IMAGE" || !asset.sourceStorageKey || asset.provider !== storage.kind || asset.status === "RETIRED") throw new AppError("Media source not found.", 404, "MEDIA_SOURCE_NOT_FOUND");
+  const extension = asset.sourceStorageKey.split(".").at(-1)?.toLowerCase();
+  const sourceMimeType = extension === "jpg" || extension === "jpeg" ? "image/jpeg" : extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "application/octet-stream";
+  return { bytes: await storage.read(asset.sourceStorageKey), mimeType: sourceMimeType };
+}
+
+export async function retryImageProcessing(actor: Actor, id: string) {
+  requirePermission(actor, "media:upload");
+  return prisma.$transaction(async (tx) => {
+    const asset = await tx.mediaAsset.findUnique({ where: { id } });
+    if (!asset || asset.kind !== "IMAGE") throw new AppError("Image asset not found.", 404, "MEDIA_NOT_FOUND");
+    if (asset.status !== "FAILED" || !asset.sourceStorageKey) throw new AppError("Only failed image processing can be retried.", 409, "MEDIA_RETRY_INVALID");
+    await tx.mediaProcessingJob.upsert({
+      where: { mediaAssetId: id },
+      create: { mediaAssetId: id },
+      update: { status: "PENDING", attempts: 0, availableAt: new Date(), lockedAt: null, completedAt: null, lastError: null },
+    });
+    const processing = await tx.mediaAsset.update({ where: { id }, data: { status: "PROCESSING", failureReason: null }, include: { variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
+    await tx.mediaAuditLog.create({ data: { mediaAssetId: id, actorId: actor.userId, action: "MEDIA_RETRY", metadata: { previousStatus: "FAILED" } } });
+    return processing;
+  });
 }
 
 export async function listMediaAssets(actor: Actor, kind?: MediaKind) {
@@ -179,6 +187,8 @@ export async function assertReadyAudio(db: Db, id: string | null, required: bool
 export async function retireMedia(actor: Actor, id: string) {
   requirePermission(actor, "media:retire");
   return prisma.$transaction(async (tx) => {
+    const current = await tx.mediaAsset.findUnique({ where: { id } });
+    if (current?.status === "PROCESSING") throw new AppError("Processing media cannot be retired.", 409, "MEDIA_PROCESSING");
     const references = await referenceRows(tx, id); if (references.length) throw new AppError("Referenced media cannot be retired.", 409, "MEDIA_REFERENCED", { references });
     const asset = await tx.mediaAsset.update({ where: { id }, data: { status: "RETIRED", retiredAt: new Date() } });
     await tx.mediaAuditLog.create({ data: { mediaAssetId: id, actorId: actor.userId, action: "MEDIA_RETIRE" } }); return asset;
@@ -191,7 +201,7 @@ export async function purgeEligibleMedia(actor: Actor, now = new Date(), storage
   for (const candidate of candidates) {
     if ((await referenceRows(prisma, candidate.id)).length) { await reconcileMediaReference(prisma, candidate.id, now); continue; }
     await Promise.all([...(candidate.sourceStorageKey ? [storage.delete(candidate.sourceStorageKey)] : []), ...candidate.variants.map((variant) => storage.delete(variant.storageKey))]);
-    await prisma.$transaction(async (tx) => { await tx.mediaAuditLog.create({ data: { mediaAssetId: candidate.id, actorId: actor.userId, action: "MEDIA_PURGE", metadata: { mediaAssetId: candidate.id, compatibilityFilename: candidate.compatibilityFilename } } }); await tx.mediaAsset.update({ where: { id: candidate.id }, data: { status: "RETIRED", retiredAt: now } }); await tx.mediaVariant.deleteMany({ where: { mediaAssetId: candidate.id } }); await tx.mediaAsset.delete({ where: { id: candidate.id } }); }); purged += 1;
+    await prisma.$transaction(async (tx) => { await tx.mediaAuditLog.create({ data: { mediaAssetId: candidate.id, actorId: actor.userId, action: "MEDIA_PURGE", metadata: { mediaAssetId: candidate.id, compatibilityFilename: candidate.compatibilityFilename } } }); await tx.mediaAsset.update({ where: { id: candidate.id }, data: { status: "RETIRED", retiredAt: now } }); await tx.mediaProcessingJob.deleteMany({ where: { mediaAssetId: candidate.id } }); await tx.mediaVariant.deleteMany({ where: { mediaAssetId: candidate.id } }); await tx.mediaAsset.delete({ where: { id: candidate.id } }); }); purged += 1;
   }
   return { examined: candidates.length, purged };
 }

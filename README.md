@@ -119,7 +119,9 @@ The scheduler is polling/cron compatible and needs no Redis:
 npm run publish:scheduled
 ```
 
-Run it once per minute in production. Each due row is checked under `FOR UPDATE SKIP LOCKED`; repeated or concurrent runs are idempotent.
+Run it once per minute in production. Each due catalogue row is checked under `FOR UPDATE SKIP LOCKED`; repeated or concurrent runs are idempotent. The same worker also recovers durable image-processing jobs that were not completed by the request's best-effort post-response kick.
+
+Image uploads validate and store the immutable source before returning a `PROCESSING` MediaAsset. A unique PostgreSQL job then generates the six legacy representations asynchronously. Next.js `after()` starts that worker promptly on Vercel, while the scheduler recovers pending or stale jobs if a function stops. Jobs use bounded retries and stale-lock recovery; failed images retain their source and can be retried from the Media library. Keep the scheduler enabled and invoke `POST /api/internal/publish-scheduled` once per minute with its existing bearer secret.
 
 ## Compatibility API
 

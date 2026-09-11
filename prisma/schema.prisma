@@ -39,6 +39,8 @@ enum AuditAction {
   MEDIA_DETACH
   MEDIA_RETIRE
   MEDIA_PURGE
+  MEDIA_PROCESS
+  MEDIA_RETRY
 }
 
 enum MediaKind {
@@ -76,6 +78,13 @@ enum MediaVariantKey {
   LEGACY_512
   LEGACY_THUMB_256
   LEGACY_THUMB_80
+}
+
+enum MediaProcessingJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 enum TrackStatus {
@@ -669,6 +678,7 @@ model MediaAsset {
   updatedAt              DateTime                 @updatedAt @db.Timestamptz(6)
   createdBy              User                     @relation(fields: [createdById], references: [id], onDelete: Restrict)
   variants               MediaVariant[]
+  processingJob          MediaProcessingJob?
   auditLogs              MediaAuditLog[]
   artistImages           Artist[]                 @relation("ArtistImage")
   artistRevisionImages   ArtistRevision[]         @relation("ArtistRevisionImage")
@@ -687,6 +697,24 @@ model MediaAsset {
   @@index([unreferencedAt])
   @@index([createdById])
   @@map("media_assets")
+}
+
+model MediaProcessingJob {
+  id           String                   @id @default(uuid()) @db.Uuid
+  mediaAssetId String                   @unique @db.Uuid
+  status       MediaProcessingJobStatus @default(PENDING)
+  attempts     Int                      @default(0)
+  availableAt DateTime                 @default(now()) @db.Timestamptz(6)
+  lockedAt    DateTime?                @db.Timestamptz(6)
+  completedAt DateTime?                @db.Timestamptz(6)
+  lastError    String?
+  createdAt    DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime                 @updatedAt @db.Timestamptz(6)
+  mediaAsset   MediaAsset               @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@index([status, availableAt])
+  @@index([lockedAt])
+  @@map("media_processing_jobs")
 }
 
 model MigrationRun {

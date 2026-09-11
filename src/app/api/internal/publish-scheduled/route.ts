@@ -4,6 +4,7 @@ import { AppError } from "@/lib/errors";
 import { runScheduledPublication } from "@/server/scheduled-publication";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function authorized(request: Request) {
   const configured = process.env.SCHEDULED_PUBLISHER_SECRET;

@@ -3,7 +3,13 @@ import { testMp3 } from "../fixtures/audio";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 async function signIn(page: Page, email: string, password: string) { await page.goto("/sign-in"); await page.getByLabel("Email").fill(email); await page.getByLabel("Password").fill(password); await page.getByRole("button", { name: "Sign in" }).click(); await expect(page).toHaveURL(/\/admin\/artists$/); }
-async function uploadImage(page: Page, name: string) { const response = await page.request.post("/api/admin/media", { headers: { Origin: "http://127.0.0.1:3000" }, multipart: { kind: "IMAGE", file: { name, mimeType: "image/png", buffer: png } } }); expect(response.ok()).toBe(true); return (await response.json()).id as string; }
+async function uploadImage(page: Page, name: string) {
+  const response = await page.request.post("/api/admin/media", { headers: { Origin: "http://127.0.0.1:3000" }, multipart: { kind: "IMAGE", file: { name, mimeType: "image/png", buffer: png } } });
+  expect(response.ok()).toBe(true);
+  const id = (await response.json()).id as string;
+  await expect.poll(async () => (await (await page.request.get(`/api/admin/media/${id}`)).json()).status).toBe("READY");
+  return id;
+}
 
 test("Editor completes local audio ingest, Track freezing, and Podcast file_id delivery", async ({ page }) => {
   const browserErrors: string[] = []; page.on("pageerror", (error) => browserErrors.push(error.message)); page.on("console", (message) => { if (message.type() === "error" && !message.text().includes("422 (Unprocessable Entity)")) browserErrors.push(message.text()); });

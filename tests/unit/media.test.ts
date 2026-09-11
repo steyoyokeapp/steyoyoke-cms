@@ -4,7 +4,8 @@ import os from "node:os";
 import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import { requirePermission } from "@/lib/authorization";
-import { checksum, IMAGE_VARIANTS, MAX_IMAGE_BYTES, processImage } from "@/modules/media/image";
+import { checksum, IMAGE_PROCESSING_CONCURRENCY, IMAGE_VARIANTS, MAX_IMAGE_BYTES, processImage } from "@/modules/media/image";
+import { mapWithConcurrency } from "@/modules/media/concurrency";
 import { LegacyMediaSerializer } from "@/modules/media/legacy";
 import { createStorageProvider, LocalStorageProvider, S3StorageProvider } from "@/modules/media/storage";
 
@@ -12,6 +13,13 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("local image processing", () => {
+  it("bounds independent work while preserving result order", async () => {
+    let active = 0; let maximum = 0;
+    const values = await mapWithConcurrency([1, 2, 3, 4, 5], IMAGE_PROCESSING_CONCURRENCY, async (value) => {
+      active += 1; maximum = Math.max(maximum, active); await new Promise((resolve) => setTimeout(resolve, 2)); active -= 1; return value * 2;
+    });
+    expect(values).toEqual([2, 4, 6, 8, 10]); expect(maximum).toBe(IMAGE_PROCESSING_CONCURRENCY);
+  });
   it.each([[400, 500], [900, 400]])("preserves portrait/landscape aspect ratio and never upscales %sx%s", async (width, height) => {
     const bytes = await sharp({ create: { width, height, channels: 3, background: "#314159" } }).jpeg().toBuffer(); const result = await processImage(bytes);
     expect(result.variants.map(({ variantKey }) => variantKey)).toEqual(IMAGE_VARIANTS.map(([key]) => key));

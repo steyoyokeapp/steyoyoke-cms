@@ -171,6 +171,7 @@ export async function applyLocalE2ECleanup() {
     await transaction.artist.deleteMany({ where: { id: { in: artistIds } } });
 
     await transaction.mediaAsset.updateMany({ where: { id: { in: mediaAssetIds } }, data: { status: "RETIRED", retiredAt: new Date() } });
+    await transaction.mediaProcessingJob.deleteMany({ where: { mediaAssetId: { in: mediaAssetIds } } });
     await transaction.mediaVariant.deleteMany({ where: { mediaAssetId: { in: mediaAssetIds } } });
     await transaction.mediaAuditLog.deleteMany({ where: { mediaAssetId: { in: mediaAssetIds } } });
     await transaction.mediaAsset.deleteMany({ where: { id: { in: mediaAssetIds } } });

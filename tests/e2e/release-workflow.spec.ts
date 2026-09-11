@@ -5,7 +5,12 @@ async function signIn(page: Page, email: string, password: string) {
 }
 
 async function uploadArtwork(page: Page, name: string) {
-  const response = await page.request.post("/api/admin/media", { headers: { Origin: "http://127.0.0.1:3000" }, multipart: { file: { name, mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") } } }); const body = await response.text(); if (!response.ok()) throw new Error(`Media upload ${response.status()}: ${body}`); return JSON.parse(body).id as string;
+  const response = await page.request.post("/api/admin/media", { headers: { Origin: "http://127.0.0.1:3000" }, multipart: { file: { name, mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") } } });
+  const body = await response.text();
+  if (!response.ok()) throw new Error(`Media upload ${response.status()}: ${body}`);
+  const id = JSON.parse(body).id as string;
+  await expect.poll(async () => (await (await page.request.get(`/api/admin/media/${id}`)).json()).status).toBe("READY");
+  return id;
 }
 
 async function clickAndWaitForReload(page: Page, name: string) {

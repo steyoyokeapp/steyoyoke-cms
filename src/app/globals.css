@@ -82,6 +82,8 @@ textarea { resize: vertical; line-height: 1.55; }
 .status.scheduled { background: #dbe8ff; }
 .status.unpublished { background: #ffe4aa; }
 .status.archived { background: #e2dfe0; color: #726e70; }
+.status.processing { background: #dbe8ff; color: #31547e; }
+.status.failed { background: #ffe0dc; color: #8c3028; }
 .publish-panel { padding: 28px 32px; }
 .publish-panel p { margin-bottom: 0; }
 .publish-panel input { width: auto; min-height: 42px; }
