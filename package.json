@@ -17,6 +17,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "auth:provision-owner": "tsx scripts/provision-owner-admin.ts",
+    "auth:reset-password": "tsx scripts/reset-password.ts",
     "publish:scheduled": "tsx src/server/run-scheduled-artists.ts",
     "migration:analyze": "tsx scripts/migration/cli.ts analyze",
     "migration:rehearse": "tsx scripts/migration/cli.ts rehearse-import",

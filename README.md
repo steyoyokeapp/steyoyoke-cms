@@ -84,6 +84,14 @@ rm .env.owner-admin
 
 The command uses Better Auth's configured password hasher and creates the verified `ADMIN` user plus its credential account in one database transaction. It never prints the password or hash. An existing email is refused without changing its name, role, or credential. Public signup remains disabled.
 
+To reset the password of an existing user in the dedicated local CMS database, run:
+
+```sh
+npm run auth:reset-password
+```
+
+The command accepts only a `DATABASE_URL` on `localhost`, `127.0.0.1`, or `::1` whose database is exactly `steyoyoke_cms_local`. It prompts for the email and asks for the new password twice without terminal echo. Only the existing Better Auth credential hash is replaced; the user profile and role are preserved, and every session for that user is revoked.
+
 For a routine password change, the signed-in owner can use Better Auth's `changePassword` server endpoint with `revokeOtherSessions: true`. For emergency revocation, delete that user's sessions and credential account and downgrade the role from `ADMIN` through a reviewed database transaction; preserve the user row because authored CMS records may reference it. A future provisioning attempt with the same email will continue to refuse it rather than silently restoring access.
 
 ## Artist workflow
