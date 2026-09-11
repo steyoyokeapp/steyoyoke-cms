@@ -72,6 +72,14 @@ enum MigrationIssueSeverity {
   INFORMATIONAL
 }
 
+enum MigrationRecordStatus {
+  PLANNED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CONFLICT
+}
+
 enum MediaVariantKey {
   ORIGINAL
   LEGACY_1440
@@ -721,13 +729,37 @@ model MediaProcessingJob {
 model MigrationRun {
   id           String           @id @default(uuid()) @db.Uuid
   sourceSha256 String
+  scopeKey     String           @default("full")
+  toolingVersion String         @default("phase2-production-safe-v1")
   startedAt    DateTime         @default(now()) @db.Timestamptz(6)
   completedAt  DateTime?        @db.Timestamptz(6)
   summary      Json?
   issues       MigrationIssue[]
+  records      MigrationRecord[]
 
   @@index([sourceSha256])
+  @@unique([sourceSha256, scopeKey, toolingVersion])
   @@map("migration_runs")
+}
+
+model MigrationRecord {
+  id             String                @id @default(uuid()) @db.Uuid
+  runId          String                @db.Uuid
+  entityType     String
+  sourceIdentity String
+  canonicalId    String?               @db.Uuid
+  stage          String
+  status         MigrationRecordStatus @default(PLANNED)
+  metadata       Json?
+  error          String?
+  createdAt      DateTime              @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime              @updatedAt @db.Timestamptz(6)
+  run            MigrationRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, entityType, sourceIdentity])
+  @@index([canonicalId])
+  @@index([runId, status])
+  @@map("migration_records")
 }
 
 model MigrationIssue {

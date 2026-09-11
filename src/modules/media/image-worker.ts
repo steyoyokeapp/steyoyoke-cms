@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Prisma } from "@/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { log, logSafeError, safeErrorFields } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { mapWithConcurrency } from "@/modules/media/concurrency";
@@ -12,19 +12,20 @@ export const MEDIA_STORAGE_WRITE_CONCURRENCY = 3;
 
 const milliseconds = (value: number) => Math.round(value * 100) / 100;
 type ClaimedJob = Prisma.MediaProcessingJobGetPayload<{ include: { mediaAsset: true } }>;
+type WorkerDb = PrismaClient | typeof prisma;
 
 async function putImmutable(storage: StorageProvider, key: string, bytes: Buffer, expectedChecksum: string) {
-  try { await storage.put(key, bytes); }
+  try { await storage.put(key, bytes); return "created" as const; }
   catch (error) {
-    try { if (checksum(await storage.read(key)) === expectedChecksum) return; }
+    try { if (checksum(await storage.read(key)) === expectedChecksum) return "existing" as const; }
     catch { /* Preserve the original immutable-write failure. */ }
     throw error;
   }
 }
 
-async function claimJob(id: string, now: Date) {
+async function claimJob(db: WorkerDb, id: string, now: Date) {
   const staleBefore = new Date(now.getTime() - MEDIA_JOB_LOCK_TIMEOUT_MS);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM "media_processing_jobs"
       WHERE id = ${id}::uuid
@@ -46,11 +47,11 @@ async function claimJob(id: string, now: Date) {
   });
 }
 
-async function recordFailure(job: ClaimedJob, error: unknown) {
+async function recordFailure(db: WorkerDb, job: ClaimedJob, error: unknown) {
   const finalAttempt = job.attempts >= MEDIA_JOB_MAX_ATTEMPTS;
   const retryAt = new Date(Date.now() + 30_000 * 2 ** Math.max(0, job.attempts - 1));
   const message = safeErrorFields(error).errorMessage;
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const updated = await tx.mediaProcessingJob.updateMany({
       where: { id: job.id, status: "RUNNING", attempts: job.attempts, lockedAt: job.lockedAt },
       data: finalAttempt
@@ -63,7 +64,7 @@ async function recordFailure(job: ClaimedJob, error: unknown) {
   });
 }
 
-async function processJob(job: ClaimedJob, storage: StorageProvider) {
+async function processJob(db: WorkerDb, job: ClaimedJob, storage: StorageProvider, auditMetadata?: Prisma.InputJsonObject) {
   const workerStartedAtMs = performance.now();
   try {
     const asset = job.mediaAsset;
@@ -76,8 +77,8 @@ async function processJob(job: ClaimedJob, storage: StorageProvider) {
     const variantWrites = await mapWithConcurrency(processed.variants, MEDIA_STORAGE_WRITE_CONCURRENCY, async (variant) => {
       const storageKey = `images/${asset.id}/${variant.variantKey.toLowerCase().replaceAll("_", "-")}.${variant.extension}`;
       const startedAtMs = performance.now();
-      await putImmutable(storage, storageKey, variant.bytes, variant.sha256Checksum);
-      return { variant, storageKey, writeMs: performance.now() - startedAtMs };
+      const storageWrite = await putImmutable(storage, storageKey, variant.bytes, variant.sha256Checksum);
+      return { variant, storageKey, storageWrite, writeMs: performance.now() - startedAtMs };
     });
     const variantData: Prisma.MediaVariantCreateManyInput[] = variantWrites.map(({ variant, storageKey }) => ({
       id: crypto.randomUUID(), mediaAssetId: asset.id, variantKey: variant.variantKey, storageKey, mimeType: variant.mimeType,
@@ -85,7 +86,7 @@ async function processJob(job: ClaimedJob, storage: StorageProvider) {
     }));
     let dbVariantWriteMs = 0;
     const finalizeStartedAtMs = performance.now();
-    await prisma.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       const ownsLease = await tx.mediaProcessingJob.count({ where: { id: job.id, status: "RUNNING", attempts: job.attempts, lockedAt: job.lockedAt } });
       if (!ownsLease) throw new Error("Image processing job lease was lost.");
       const dbVariantWriteStartedAtMs = performance.now();
@@ -99,7 +100,7 @@ async function processJob(job: ClaimedJob, storage: StorageProvider) {
       const finalized = await tx.mediaAsset.updateMany({ where: { id: asset.id, status: "PROCESSING" }, data: { status: "READY", failureReason: null, unreferencedAt: new Date() } });
       if (!finalized.count) throw new Error("Image asset lifecycle changed before worker finalization.");
       await tx.mediaProcessingJob.update({ where: { id: job.id }, data: { status: "COMPLETED", lockedAt: null, completedAt: new Date(), lastError: null } });
-      await tx.mediaAuditLog.create({ data: { mediaAssetId: asset.id, actorId: asset.createdById, action: "MEDIA_PROCESS", metadata: { variantCount: stored.length, attempt: job.attempts } } });
+      await tx.mediaAuditLog.create({ data: { mediaAssetId: asset.id, actorId: asset.createdById, action: "MEDIA_PROCESS", metadata: { variantCount: stored.length, attempt: job.attempts, createdStorageKeys: variantWrites.filter(({ storageWrite }) => storageWrite === "created").map(({ storageKey }) => storageKey), ...auditMetadata } } });
     });
     const finalizeMs = performance.now() - finalizeStartedAtMs;
     const storageWriteMs = variantWrites.reduce((sum, value) => sum + value.writeMs, 0);
@@ -117,7 +118,7 @@ async function processJob(job: ClaimedJob, storage: StorageProvider) {
     });
     return "completed" as const;
   } catch (error) {
-    const outcome = await recordFailure(job, error);
+    const outcome = await recordFailure(db, job, error);
     logSafeError("media_image_processing_failed", error, {
       operation: "image representation processing", mediaAssetId: job.mediaAssetId, processingJobId: job.id,
       attempt: job.attempts, outcome, storageProvider: storage.kind,
@@ -126,12 +127,13 @@ async function processJob(job: ClaimedJob, storage: StorageProvider) {
   }
 }
 
-export async function runMediaProcessingJobs(options: { limit?: number; mediaAssetId?: string; storage?: StorageProvider; now?: Date } = {}) {
+export async function runMediaProcessingJobs(options: { limit?: number; mediaAssetId?: string; storage?: StorageProvider; now?: Date; db?: WorkerDb; auditMetadata?: Prisma.InputJsonObject } = {}) {
   const limit = Math.max(1, Math.min(options.limit ?? 5, 25));
   const storage = options.storage ?? mediaStorage;
+  const db = options.db ?? prisma;
   const now = options.now ?? new Date();
   const staleBefore = new Date(now.getTime() - MEDIA_JOB_LOCK_TIMEOUT_MS);
-  const candidates = await prisma.mediaProcessingJob.findMany({
+  const candidates = await db.mediaProcessingJob.findMany({
     where: {
       attempts: { lt: MEDIA_JOB_MAX_ATTEMPTS }, mediaAsset: { status: "PROCESSING" }, ...(options.mediaAssetId ? { mediaAssetId: options.mediaAssetId } : {}),
       OR: [{ status: "PENDING", availableAt: { lte: now } }, { status: "RUNNING", lockedAt: { lte: staleBefore } }],
@@ -140,8 +142,8 @@ export async function runMediaProcessingJobs(options: { limit?: number; mediaAss
   });
   const outcomes: string[] = [];
   for (const candidate of candidates) {
-    const claimed = await claimJob(candidate.id, now);
-    if (claimed) outcomes.push(await processJob(claimed, storage));
+    const claimed = await claimJob(db, candidate.id, now);
+    if (claimed) outcomes.push(await processJob(db, claimed, storage, options.auditMetadata));
   }
   return {
     examined: candidates.length,

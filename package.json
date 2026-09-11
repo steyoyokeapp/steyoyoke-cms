@@ -21,11 +21,14 @@
     "dev:cleanup-e2e": "tsx scripts/cleanup-local-e2e.ts",
     "publish:scheduled": "tsx src/server/run-scheduled-artists.ts",
     "migration:analyze": "tsx scripts/migration/cli.ts analyze",
+    "migration:plan": "tsx scripts/migration/cli.ts plan",
     "migration:rehearse": "tsx scripts/migration/cli.ts rehearse-import",
+    "migration:controlled": "tsx scripts/migration/cli.ts controlled-import",
     "migration:staging": "tsx scripts/migration/cli.ts staging-import",
     "migration:compare": "tsx scripts/migration/cli.ts compare",
     "migration:report": "tsx scripts/migration/cli.ts report",
     "migration:manifest": "tsx scripts/migration/cli.ts manifest",
+    "migration:rollback-plan": "tsx scripts/migration/cli.ts rollback-plan",
     "staging:manifest": "tsx scripts/staging/manifest.ts"
   },
   "allowScripts": {

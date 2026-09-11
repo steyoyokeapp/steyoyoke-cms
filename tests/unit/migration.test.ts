@@ -1,11 +1,17 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { analyzeCatalogue, mapLabel, normalizeLegacyUrl, parseLegacyChapters, parseLegacyDate, parseLegacyDuration, resolveArtworkSource, resolveArtworkSourceDetailed } from "../../scripts/migration/analysis";
 import { stableUuid } from "../../scripts/migration/identity";
-import { extractTables } from "../../scripts/migration/legacy-dump";
+import { extractTables, loadLegacySnapshot } from "../../scripts/migration/legacy-dump";
 import { buildMigrationManifest } from "../../scripts/migration/manifest";
+import { logicalComparisonFingerprint } from "../../scripts/migration/compare";
+import { historicalImageId, historicalImageSourceIdentity } from "../../scripts/migration/media";
+import { assertImportSuccess, migrationQualityStatus } from "../../scripts/migration/quality";
+import { monotonicNextValue } from "../../scripts/migration/sequences";
+import { selectMigrationScope } from "../../scripts/migration/scope";
+import { APPROVED_SOURCE_SHA256, assertControlledImportGuards, classifyReleaseTracks, databaseTargetIdentity, externalAudioInvariantError, migrationRunId, storageTargetIdentity } from "../../scripts/migration/safety";
 
 const temporaryDirectories: string[] = [];
 afterEach(async () => { await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))); });
@@ -102,6 +108,41 @@ describe("catalogue migration primitives", () => {
     expect(stableUuid("track", 7)).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("creates stable historical image identities across different media roots", () => {
+    const checksum = "a".repeat(64);
+    const first = historicalImageSourceIdentity("/machine-a/media", "/machine-a/media/covers/example.jpg", checksum);
+    const second = historicalImageSourceIdentity("/other/checkout/media", "/other/checkout/media/covers/example.jpg", checksum);
+    expect(first).toBe("covers/example.jpg:" + checksum);
+    expect(second).toBe(first);
+    expect(historicalImageId(second)).toBe(historicalImageId(first));
+    expect(historicalImageSourceIdentity("/machine-a/media", "/machine-a/media/other/example.jpg", checksum)).not.toBe(first);
+  });
+
+  it("calculates a reusable sample dependency closure", () => {
+    const selected = selectMigrationScope({
+      artists: [{ id: "4", name: "Primary" }, { id: "5", name: "Secondary" }, { id: "6", name: "Unused" }],
+      tracks: [{ id: "10", type: "track", artist_id: "4" }, { id: "11", type: "podcast", artist_id: "5" }, { id: "12", type: "track", artist_id: "6" }],
+      releases: [{ id: "20", artist_id: "5" }, { id: "21", artist_id: "6" }],
+      releaseTracks: [{ release_id: "20", track_id: "10", priority: "0" }, { release_id: "21", track_id: "12", priority: "0" }],
+    }, { podcasts: [11], releases: [20] });
+    expect(selected.closure).toEqual({ artists: [4, 5], tracks: [10], podcasts: [11], releases: [20] });
+    expect(selected.catalogue.releaseTracks).toEqual([{ release_id: "20", track_id: "10", priority: "0" }]);
+  });
+
+  it("never moves sequence allocation backwards", () => {
+    expect(monotonicNextValue(399, 399, 400, false)).toBe(400);
+    expect(monotonicNextValue(399, 450, 430, true)).toBe(451);
+    expect(monotonicNextValue(399, 399, 500, true)).toBe(501);
+  });
+
+  it("fails strict reconciliation for bugs, unclassified, or unapproved migration data", () => {
+    expect(migrationQualityStatus({ "EXPECTED NORMALIZATION": 1213, BUG: 0, UNCLASSIFIED: 0, "MIGRATION DATA ISSUE": 0 })).toBe("PASS_WITH_CLASSIFIED_DIFFERENCES");
+    expect(migrationQualityStatus({ BUG: 1 })).toBe("FAIL");
+    expect(migrationQualityStatus({ UNCLASSIFIED: 1 })).toBe("FAIL");
+    expect(migrationQualityStatus({ "MIGRATION DATA ISSUE": 1 })).toBe("FAIL");
+    expect(migrationQualityStatus({ "MIGRATION DATA ISSUE": 1 }, 1)).toBe("PASS_WITH_CLASSIFIED_DIFFERENCES");
+  });
+
   it("splits Track and Podcast counts and records dangling relations", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "phase-11-analysis-")); temporaryDirectories.push(root);
     const result = await analyzeCatalogue("fixture", {
@@ -136,5 +177,97 @@ describe("catalogue migration primitives", () => {
     const comparison = { status: "PASS_WITH_CLASSIFIED_DIFFERENCES", classifications: { BUG: 0 } };
     const first = buildMigrationManifest(summary, comparison, "deadbeef"); const second = buildMigrationManifest(summary, comparison, "deadbeef");
     expect(second).toEqual(first); expect(JSON.stringify(first)).not.toMatch(/password|token|secret/i);
+  });
+
+  it("fingerprints reconciliation logically rather than by database result order", () => {
+    const base = { sourceSha256: "a".repeat(64), compared: { artists: 1 }, classifications: { BUG: 0 }, status: "PASS_WITH_CLASSIFIED_DIFFERENCES" };
+    const first = [{ classification: "EXPECTED NORMALIZATION" as const, entity: "artist", legacyId: 2, field: "name", source: " A ", canonical: "A" }, { classification: "EXPECTED NORMALIZATION" as const, entity: "artist", legacyId: 1, field: "name", source: " B ", canonical: "B" }];
+    expect(logicalComparisonFingerprint({ ...base, differences: first })).toBe(logicalComparisonFingerprint({ ...base, differences: [...first].reverse() }));
+  });
+
+  it("binds controlled-import authorization to the actual source, resolved scope, DB endpoint, storage target, and write intent", () => {
+    const databaseUrl = "postgresql://user:do-not-print@example.test:6543/catalogue?sslmode=require";
+    const environment = {
+      MEDIA_STORAGE_PROVIDER: "s3", MEDIA_S3_BUCKET: "catalogue-prod", MEDIA_S3_REGION: "eu-west-1", MEDIA_S3_ENDPOINT: "https://objects.example.test/private?token=secret", MEDIA_S3_PREFIX: "/migration/v1/",
+      MIGRATION_CONFIRM_SOURCE_SHA: APPROVED_SOURCE_SHA256,
+      MIGRATION_CONFIRM_SCOPE: "artists=4;tracks=1329;podcasts=1283;releases=47",
+      MIGRATION_CONFIRM_TARGET: "example.test:6543/catalogue",
+      MIGRATION_CONFIRM_STORAGE: "S3_COMPATIBLE:bucket=catalogue-prod;region=eu-west-1;endpoint=objects.example.test;prefix=migration/v1",
+      MIGRATION_CONFIRM_WRITE: "import:example.test:6543/catalogue;scope=artists=4;tracks=1329;podcasts=1283;releases=47;storage=S3_COMPATIBLE:bucket=catalogue-prod;region=eu-west-1;endpoint=objects.example.test;prefix=migration/v1",
+    };
+    expect(assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl, environment })).toMatchObject({ databaseIdentity: "example.test:6543/catalogue" });
+    expect(databaseTargetIdentity(databaseUrl)).not.toContain("user");
+    expect(storageTargetIdentity(environment)).not.toContain("token");
+    expect(() => assertControlledImportGuards({ actualSourceSha256: "f".repeat(64), scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl, environment })).toThrow(/loaded legacy snapshot/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: "full", databaseUrl, environment })).toThrow(/SCOPE/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl: databaseUrl.replace("example.test", "other.test"), environment })).toThrow(/TARGET/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl: databaseUrl.replace("/catalogue", "/other_database"), environment })).toThrow(/TARGET/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl, environment: { ...environment, MIGRATION_CONFIRM_STORAGE: undefined } })).toThrow(/STORAGE/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl, environment: { ...environment, MEDIA_S3_BUCKET: "wrong" } })).toThrow(/STORAGE/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl, environment: { ...environment, MEDIA_S3_PREFIX: "other-prefix" } })).toThrow(/STORAGE/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl, environment: { ...environment, MEDIA_STORAGE_PROVIDER: "local", MEDIA_STORAGE_ROOT: "/tmp/media" } })).toThrow(/STORAGE/);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: environment.MIGRATION_CONFIRM_SCOPE, databaseUrl, environment: { ...environment, MIGRATION_CONFIRM_SOURCE_SHA: "0".repeat(64) } })).toThrow(/SOURCE_SHA/);
+  });
+
+  it("requires explicit full scope confirmation when selectors are omitted", () => {
+    const databaseUrl = "postgresql://localhost/catalogue";
+    const storage = storageTargetIdentity({ MEDIA_STORAGE_PROVIDER: "local", MEDIA_STORAGE_ROOT: "/tmp/catalogue" });
+    const base = { MEDIA_STORAGE_PROVIDER: "local", MEDIA_STORAGE_ROOT: "/tmp/catalogue", MIGRATION_CONFIRM_SOURCE_SHA: APPROVED_SOURCE_SHA256, MIGRATION_CONFIRM_TARGET: "localhost:5432/catalogue", MIGRATION_CONFIRM_STORAGE: storage, MIGRATION_CONFIRM_WRITE: `import:localhost:5432/catalogue;scope=full;storage=${storage}` };
+    expect(() => assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: "full", databaseUrl, environment: base })).toThrow(/SCOPE/);
+    expect(assertControlledImportGuards({ actualSourceSha256: APPROVED_SOURCE_SHA256, scopeKey: "full", databaseUrl, environment: { ...base, MIGRATION_CONFIRM_SCOPE: "full" } })).toBeTruthy();
+  });
+
+  it("rejects changed snapshot contents even when the operator confirms the approved SHA", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "phase-3b-snapshot-")); temporaryDirectories.push(root);
+    const snapshot = path.join(root, "changed.sql"); await writeFile(snapshot, "INSERT INTO `artists` (`id`,`name`) VALUES (1,'Changed');");
+    const loaded = await loadLegacySnapshot(snapshot);
+    const databaseUrl = "postgresql://localhost/catalogue"; const storage = storageTargetIdentity({ MEDIA_STORAGE_PROVIDER: "local", MEDIA_STORAGE_ROOT: root });
+    const environment = { MEDIA_STORAGE_PROVIDER: "local", MEDIA_STORAGE_ROOT: root, MIGRATION_CONFIRM_SOURCE_SHA: APPROVED_SOURCE_SHA256, MIGRATION_CONFIRM_SCOPE: "full", MIGRATION_CONFIRM_TARGET: "localhost:5432/catalogue", MIGRATION_CONFIRM_STORAGE: storage, MIGRATION_CONFIRM_WRITE: `import:localhost:5432/catalogue;scope=full;storage=${storage}` };
+    expect(loaded.sourceSha256).not.toBe(APPROVED_SOURCE_SHA256);
+    expect(() => assertControlledImportGuards({ actualSourceSha256: loaded.sourceSha256, scopeKey: "full", databaseUrl, environment })).toThrow(/loaded legacy snapshot/);
+  });
+
+  it("uses generation-isolated deterministic run IDs", () => {
+    const current = migrationRunId(APPROVED_SOURCE_SHA256, "full");
+    expect(current).toBe(migrationRunId(APPROVED_SOURCE_SHA256, "full"));
+    expect(current).not.toBe(stableUuid("migration-run", APPROVED_SOURCE_SHA256));
+  });
+
+  it("classifies ReleaseTracks once for plan/import parity", () => {
+    const result = classifyReleaseTracks([
+      { release_id: "1", track_id: "10", priority: "0" },
+      { release_id: "1", track_id: "10", priority: "1" },
+      { release_id: "1", track_id: "11", priority: "0" },
+      { release_id: "1", track_id: "12", priority: "bad" },
+      { release_id: "2", track_id: "10", priority: "0" },
+    ], new Set([1]), new Set([10, 11, 12]));
+    expect(result.accepted.map(({ trackLegacyId, position }) => ({ trackLegacyId, position }))).toEqual([{ trackLegacyId: 10, position: 0 }]);
+    expect(result.rejected.map(({ reason }) => reason).sort()).toEqual(["DUPLICATE_POSITION", "DUPLICATE_TRACK", "INVALID_PRIORITY", "MISSING_RELEASE"].sort());
+  });
+
+  it("rejects any binary, variant, or job state on LEGACY_EXTERNAL audio", () => {
+    const legacyAudioId = "audio-1";
+    const base = { id: stableUuid("legacy-audio", legacyAudioId), kind: "AUDIO", provider: "LEGACY_EXTERNAL", status: "EXTERNAL", legacyAudioId, sourceStorageKey: null, compatibilityFilename: null, originalFilename: null, mimeType: null, byteSize: null, sha256Checksum: null, width: null, height: null, durationMs: null, failureReason: null, retiredAt: null, createdById: "00000000-0000-4000-8000-000000000011", variants: [], processingJob: null };
+    expect(externalAudioInvariantError(base, legacyAudioId)).toBeNull();
+    expect(externalAudioInvariantError({ ...base, sourceStorageKey: "audio/file.mp3" }, legacyAudioId)).toMatch(/sourceStorageKey/);
+    expect(externalAudioInvariantError({ ...base, variants: [{}] }, legacyAudioId)).toMatch(/MediaVariants/);
+    expect(externalAudioInvariantError({ ...base, processingJob: {} }, legacyAudioId)).toMatch(/MediaProcessingJob/);
+  });
+
+  it("keeps runs incomplete for every strict-gate failure class", () => {
+    const passing = { scopeKey: "sample", sourceSha256: APPROVED_SOURCE_SHA256, analysisBlockers: 0, analysisWarnings: 0, blocked: { artists: 0, tracks: 0, podcasts: 0, releases: 0, releaseTracks: 0 }, expectedOmittedReleaseTracks: 0, failedCheckpoints: 0, conflictingCheckpoints: 0, incompleteImages: 0, incompleteImageJobs: 0, canonicalCountMismatches: [], comparison: { status: "PASS_WITH_CLASSIFIED_DIFFERENCES", classifications: { BUG: 0, UNCLASSIFIED: 0, "MIGRATION DATA ISSUE": 0, "COMPATIBILITY DIFFERENCE": 0 } } };
+    expect(() => assertImportSuccess(passing)).not.toThrow();
+    expect(() => assertImportSuccess({ ...passing, analysisBlockers: 1 })).toThrow(/BLOCKER/);
+    expect(() => assertImportSuccess({ ...passing, failedCheckpoints: 1 })).toThrow(/FAILED/);
+    expect(() => assertImportSuccess({ ...passing, conflictingCheckpoints: 1 })).toThrow(/CONFLICT/);
+    expect(() => assertImportSuccess({ ...passing, incompleteImageJobs: 1 })).toThrow(/image job/);
+    expect(() => assertImportSuccess({ ...passing, comparison: { status: "FAIL", classifications: { BUG: 1 } } })).toThrow(/comparison status/);
+  });
+
+  it("backfills historical MigrationRuns with per-row identities before adding uniqueness", async () => {
+    const sql = await readFile(path.join(process.cwd(), "prisma/migrations/20260911193000_migration_run_checkpoints/migration.sql"), "utf8");
+    expect(sql).toContain("'legacy:' || \"id\"::text");
+    expect(sql).toContain('("sourceSha256", "scopeKey", "toolingVersion")');
+    expect(sql).not.toContain('migration_runs_sourceSha256_scopeKey_key');
   });
 });
