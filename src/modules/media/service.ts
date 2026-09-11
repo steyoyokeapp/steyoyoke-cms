@@ -4,7 +4,7 @@ import { MediaStatus } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/authorization";
 import { requirePermission } from "@/lib/authorization";
 import { AppError } from "@/lib/errors";
-import { logSafeError } from "@/lib/logger";
+import { log, logSafeError } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { processImage } from "@/modules/media/image";
 import { processAudio } from "@/modules/media/audio";
@@ -13,10 +13,13 @@ import { mediaStorage, type StorageProvider } from "@/modules/media/storage";
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 type Db = Prisma.TransactionClient | typeof prisma;
 
-type UploadDiagnostics = { requestId?: string };
+type UploadDiagnostics = { requestId?: string; requestStartedAtMs?: number; parseMs?: number };
+
+const milliseconds = (value: number) => Math.round(value * 100) / 100;
 
 export async function createAndProcessImage(actor: Actor, file: { name: string; bytes: Buffer }, storage: StorageProvider = mediaStorage, diagnostics: UploadDiagnostics = {}) {
   requirePermission(actor, "media:upload");
+  const uploadStartedAtMs = diagnostics.requestStartedAtMs ?? performance.now();
   const id = crypto.randomUUID();
   let failureKind = "processing";
   let failureStage = "process_image";
@@ -27,29 +30,54 @@ export async function createAndProcessImage(actor: Actor, file: { name: string; 
     const sourceStorageKey = `images/${id}/source.${sourceExtension}`;
     const compatibilityFilename = `${id}.${original.extension}`;
     failureKind = "database"; failureStage = "create_media_asset";
+    const dbCreateStartedAtMs = performance.now();
     const asset = await prisma.mediaAsset.create({ data: {
       id, kind: "IMAGE", status: "PROCESSING", provider: storage.kind, sourceStorageKey, compatibilityFilename,
       originalFilename: file.name.slice(0, 255) || "upload", mimeType: original.mimeType, byteSize: file.bytes.length,
       sha256Checksum: processed.sourceChecksum, width: processed.sourceWidth, height: processed.sourceHeight, createdById: actor.userId,
     } });
+    const dbCreateMs = performance.now() - dbCreateStartedAtMs;
     const written: string[] = [];
     try {
       failureKind = "storage"; failureStage = "write_source";
+      const sourceWriteStartedAtMs = performance.now();
       await storage.put(sourceStorageKey, file.bytes); written.push(sourceStorageKey);
+      const sourceWriteMs = performance.now() - sourceWriteStartedAtMs;
       const variantData: Prisma.MediaVariantCreateManyInput[] = [];
+      const variantWriteTimings: Array<{ variantKey: string; writeMs: number }> = [];
       for (const variant of processed.variants) {
         const storageKey = `images/${id}/${variant.variantKey.toLowerCase().replaceAll("_", "-")}.${variant.extension}`;
         failureStage = "write_variant";
+        const variantWriteStartedAtMs = performance.now();
         await storage.put(storageKey, variant.bytes); written.push(storageKey);
+        variantWriteTimings.push({ variantKey: variant.variantKey, writeMs: performance.now() - variantWriteStartedAtMs });
         variantData.push({ id: crypto.randomUUID(), mediaAssetId: id, variantKey: variant.variantKey, storageKey, mimeType: variant.mimeType, byteSize: variant.bytes.length, sha256Checksum: variant.sha256Checksum, width: variant.width, height: variant.height });
       }
       failureKind = "database"; failureStage = "finalize_media_asset";
-      return await prisma.$transaction(async (tx) => {
+      let dbVariantWriteMs = 0;
+      const finalizeStartedAtMs = performance.now();
+      const ready = await prisma.$transaction(async (tx) => {
+        const dbVariantWriteStartedAtMs = performance.now();
         await tx.mediaVariant.createMany({ data: variantData });
+        dbVariantWriteMs = performance.now() - dbVariantWriteStartedAtMs;
         const ready = await tx.mediaAsset.update({ where: { id }, data: { status: "READY", unreferencedAt: new Date() }, include: { variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
         await tx.mediaAuditLog.create({ data: { mediaAssetId: id, actorId: actor.userId, action: "MEDIA_UPLOAD", metadata: { kind: "IMAGE", originalFilename: ready.originalFilename, byteSize: ready.byteSize } } });
         return ready;
       });
+      const finalizeMs = performance.now() - finalizeStartedAtMs;
+      const storageWriteMs = sourceWriteMs + variantWriteTimings.reduce((sum, timing) => sum + timing.writeMs, 0);
+      log("info", "media_image_upload_profile", {
+        requestId: diagnostics.requestId, operation: "image upload", storageProvider: storage.kind,
+        totalMs: milliseconds(performance.now() - uploadStartedAtMs), parseMs: milliseconds(diagnostics.parseMs ?? 0),
+        dbCreateMs: milliseconds(dbCreateMs), imageProcessingMs: milliseconds(processed.profile.imageProcessingMs),
+        metadataMs: milliseconds(processed.profile.metadataMs), variantProcessingMs: milliseconds(processed.profile.variantProcessingMs),
+        storageWriteMs: milliseconds(storageWriteMs), s3WriteMs: storage.kind === "S3_COMPATIBLE" ? milliseconds(storageWriteMs) : undefined,
+        sourceWriteMs: milliseconds(sourceWriteMs), dbVariantWriteMs: milliseconds(dbVariantWriteMs), finalizeMs: milliseconds(finalizeMs),
+        variantCount: processed.variants.length, inputByteSize: file.bytes.length, inputWidth: processed.sourceWidth, inputHeight: processed.sourceHeight,
+        ...Object.fromEntries(processed.profile.variants.map((timing) => [`variantProcessingMs_${timing.variantKey}`, milliseconds(timing.processingMs)])),
+        ...Object.fromEntries(variantWriteTimings.map((timing) => [`variantStorageWriteMs_${timing.variantKey}`, milliseconds(timing.writeMs)])),
+      });
+      return ready;
     } catch (error) {
       const cleanup = await Promise.allSettled([
         ...written.map((key) => storage.delete(key)),

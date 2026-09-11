@@ -9,7 +9,7 @@ import { createPodcast, getPodcast, publishPodcast, updatePodcastDraft } from "@
 import { createRelease, getRelease, publishRelease, replaceReleaseTracks, updateReleaseDraft } from "@/modules/releases/service";
 import { createTrack, getTrack, publishTrack, updateTrackDraft } from "@/modules/tracks/service";
 import { GET as getLegacyMedia } from "@/app/assets/uploads/files/[...path]/route";
-import { localStorage } from "@/modules/media/storage";
+import { localStorage, S3StorageProvider } from "@/modules/media/storage";
 
 class MemoryStorage implements StorageProvider {
   readonly kind = "LOCAL" as const;
@@ -38,6 +38,18 @@ describe("media service and frozen artwork references", () => {
     expect(asset.variants.find(({ variantKey }) => variantKey === "LEGACY_1440")).toMatchObject({ width: 400, height: 500 }); expect(asset.variants.find(({ variantKey }) => variantKey === "LEGACY_THUMB_80")).toMatchObject({ width: 64, height: 80 }); expect(storage.files.size).toBe(7);
     expect(await prisma.mediaAuditLog.count({ where: { mediaAssetId: asset.id, action: "MEDIA_UPLOAD" } })).toBe(1);
     await expect(prisma.mediaAsset.update({ where: { id: asset.id }, data: { sha256Checksum: "b".repeat(64) } })).rejects.toThrow(/immutable/); await expect(prisma.mediaVariant.update({ where: { id: asset.variants[0]!.id }, data: { width: 9 } })).rejects.toThrow(/immutable/);
+  });
+
+  it("emits one safe structured profile event for an S3-compatible image upload", async () => {
+    const output = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const storage = new S3StorageProvider({ bucket: "profile-test", region: "test", client: { send: async () => ({}) } as never });
+    await createAndProcessImage(editor, { name: "private-filename.jpg", bytes: image }, storage, { requestId: "iad1::profile-test", parseMs: 1.25 });
+    const profiles = output.mock.calls.map(([line]) => JSON.parse(String(line))).filter(({ event }) => event === "media_image_upload_profile");
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({ requestId: "iad1::profile-test", operation: "image upload", storageProvider: "S3_COMPATIBLE", parseMs: 1.25, variantCount: 6, inputByteSize: image.length, inputWidth: 400, inputHeight: 500 });
+    for (const field of ["totalMs", "dbCreateMs", "imageProcessingMs", "metadataMs", "variantProcessingMs", "storageWriteMs", "s3WriteMs", "sourceWriteMs", "dbVariantWriteMs", "finalizeMs", "variantProcessingMs_ORIGINAL", "variantStorageWriteMs_ORIGINAL"]) expect(profiles[0][field]).toEqual(expect.any(Number));
+    expect(JSON.stringify(profiles[0])).not.toContain("private-filename.jpg");
+    output.mockRestore();
   });
 
   it("rejects corrupt uploads without partial READY state", async () => {
