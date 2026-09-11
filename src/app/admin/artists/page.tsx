@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { actorForPage } from "@/lib/session";
+import { formatCmsDate } from "@/lib/date";
 import { listArtists } from "@/modules/artists/service";
 
 export default async function ArtistsPage() {
@@ -22,7 +23,7 @@ export default async function ArtistsPage() {
             <span className="mono">{artist.legacyId}</span>
             <span><i className={`status ${artist.status.toLowerCase()}`}>{artist.status}</i></span>
             <span className="mono">v{artist.workingVersion}</span>
-            <span>{new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(artist.updatedAt)}</span>
+            <span>{formatCmsDate(artist.updatedAt)}</span>
           </Link>
         ))}
       </section>

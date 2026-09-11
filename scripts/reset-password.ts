@@ -26,7 +26,7 @@ function hiddenQuestion(prompt: string) {
 
 let disconnect: (() => Promise<void>) | undefined;
 try {
-  assertLocalCmsDatabase(process.env.DATABASE_URL);
+  assertLocalCmsDatabase(process.env.DATABASE_URL, "Password reset");
   const terminal = createInterface({ input: stdin, output: stdout });
   const email = await terminal.question("User email: "); terminal.close();
   const password = await hiddenQuestion("New password: ");
