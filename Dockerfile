@@ -6,7 +6,8 @@ RUN npm ci
 
 FROM dependencies AS builder
 COPY . .
-ENV DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
+ENV NEXT_STANDALONE_OUTPUT=true \
+    DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
     BETTER_AUTH_SECRET=build-only-placeholder-not-a-runtime-secret \
     BETTER_AUTH_URL=http://127.0.0.1:3000 \
     LEGACY_API_KEY_A=build-only-key-a \
