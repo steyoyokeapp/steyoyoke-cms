@@ -56,6 +56,19 @@ describe("media service and frozen artwork references", () => {
     output.mockRestore();
   });
 
+  it("accepts materialized S3 media while preserving provider integrity checks", async () => {
+    const materialized = { originalFilename: "remote.jpg", mimeType: "image/jpeg", byteSize: 320_000, sha256Checksum: "d".repeat(64), width: 400, height: 500, createdById: editor.userId };
+    const asset = await prisma.mediaAsset.create({ data: { ...materialized, kind: "IMAGE", status: "PROCESSING", provider: "S3_COMPATIBLE", sourceStorageKey: `images/${crypto.randomUUID()}/source.jpg`, compatibilityFilename: `${crypto.randomUUID()}.jpg` } });
+    expect(asset).toMatchObject({ provider: "S3_COMPATIBLE", status: "PROCESSING" });
+
+    async function expectProviderIntegrity(operation: Promise<unknown>) {
+      try { await operation; expect.unreachable("provider integrity constraint should reject the row"); }
+      catch (error) { expect(error).toMatchObject({ code: "P2039" }); expect(String(error)).toContain("media_assets_provider_integrity"); }
+    }
+    await expectProviderIntegrity(prisma.mediaAsset.create({ data: { ...materialized, kind: "IMAGE", status: "PROCESSING", provider: "S3_COMPATIBLE", sourceStorageKey: null, compatibilityFilename: `${crypto.randomUUID()}.jpg` } }));
+    await expectProviderIntegrity(prisma.mediaAsset.create({ data: { kind: "AUDIO", status: "READY", provider: "LEGACY_EXTERNAL", legacyAudioId: crypto.randomUUID(), createdById: editor.userId } }));
+  });
+
   it("delivers only known virtual legacy variants with immutable cache headers", async () => {
     const asset = await createAndProcessImage(editor, { name: "route.jpg", bytes: image });
     const response = await getLegacyMedia(new Request(`http://local/assets/uploads/files/512/${asset.compatibilityFilename}`), { params: Promise.resolve({ path: ["512", asset.compatibilityFilename] }) } as never);
