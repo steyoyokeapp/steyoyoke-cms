@@ -5,5 +5,5 @@ import { listMediaAssets } from "@/modules/media/service";
 
 export default async function MediaPage() {
   const actor = await actorForPage(await headers()); const assets = await listMediaAssets(actor);
-  return <><section className="page-heading"><div><div className="eyebrow">Library</div><h1>Media</h1><p className="muted">Local-only immutable image and audio assets.</p></div></section><MediaManager role={actor.role} initial={assets.map((asset) => ({ ...asset, createdAt: asset.createdAt.toISOString() }))} /></>;
+  return <><section className="page-heading"><div><div className="eyebrow">Content</div><h1>Media</h1><p className="muted">Managed image and audio assets.</p></div></section><MediaManager role={actor.role} initial={assets.map((asset) => ({ ...asset, createdAt: asset.createdAt.toISOString() }))} /></>;
 }
