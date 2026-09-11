@@ -65,6 +65,27 @@ Requirements: Node.js 24+ and PostgreSQL 16+.
 
 `LEGACY_API_KEY_A` and `LEGACY_API_KEY_B` are the two compatibility credentials. They are compared server-side and never returned. The local values must be fake and unrelated to legacy or production secrets.
 
+## Provision the owner ADMIN
+
+Provision the first production owner only from a trusted local machine. Pull the linked Vercel project's production environment into an ignored, temporary file, enter the new credentials without terminal echo, and run the dedicated command:
+
+```sh
+vercel env pull .env.owner-admin --environment=production
+chmod 600 .env.owner-admin
+read "OWNER_ADMIN_EMAIL?Owner email: "
+read -s "OWNER_ADMIN_PASSWORD?Owner password: " && echo
+read "OWNER_ADMIN_NAME?Owner name [Steyoyoke Owner]: "
+export OWNER_ADMIN_EMAIL OWNER_ADMIN_PASSWORD
+export OWNER_ADMIN_NAME="${OWNER_ADMIN_NAME:-Steyoyoke Owner}"
+DOTENV_CONFIG_PATH=.env.owner-admin npm run auth:provision-owner
+unset OWNER_ADMIN_EMAIL OWNER_ADMIN_PASSWORD OWNER_ADMIN_NAME
+rm .env.owner-admin
+```
+
+The command uses Better Auth's configured password hasher and creates the verified `ADMIN` user plus its credential account in one database transaction. It never prints the password or hash. An existing email is refused without changing its name, role, or credential. Public signup remains disabled.
+
+For a routine password change, the signed-in owner can use Better Auth's `changePassword` server endpoint with `revokeOtherSessions: true`. For emergency revocation, delete that user's sessions and credential account and downgrade the role from `ADMIN` through a reviewed database transaction; preserve the user row because authored CMS records may reference it. A future provisioning attempt with the same email will continue to refuse it rather than silently restoring access.
+
 ## Artist workflow
 
 - Create allocates a permanent numeric `legacyId`, a UUID, and a deterministic unique slug.
