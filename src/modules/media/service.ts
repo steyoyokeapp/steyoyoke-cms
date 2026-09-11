@@ -101,9 +101,9 @@ export async function getMediaAsset(actor: Actor, id: string) {
 export async function readMediaSource(actor: Actor, id: string, storage: StorageProvider = mediaStorage) {
   requirePermission(actor, "media:read");
   const asset = await prisma.mediaAsset.findUnique({ where: { id } });
-  if (!asset || asset.kind !== "IMAGE" || !asset.sourceStorageKey || asset.provider !== storage.kind || asset.status === "RETIRED") throw new AppError("Media source not found.", 404, "MEDIA_SOURCE_NOT_FOUND");
+  if (!asset || !asset.sourceStorageKey || asset.provider !== storage.kind) throw new AppError("Media source not found.", 404, "MEDIA_SOURCE_NOT_FOUND");
   const extension = asset.sourceStorageKey.split(".").at(-1)?.toLowerCase();
-  const sourceMimeType = extension === "jpg" || extension === "jpeg" ? "image/jpeg" : extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "application/octet-stream";
+  const sourceMimeType = extension === "jpg" || extension === "jpeg" ? "image/jpeg" : extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : asset.mimeType ?? "application/octet-stream";
   return { bytes: await storage.read(asset.sourceStorageKey), mimeType: sourceMimeType };
 }
 
@@ -126,7 +126,7 @@ export async function retryImageProcessing(actor: Actor, id: string) {
 
 export async function listMediaAssets(actor: Actor, kind?: MediaKind) {
   requirePermission(actor, "media:read");
-  const assets = await prisma.mediaAsset.findMany({ where: kind ? { kind } : undefined, include: { variants: true, createdBy: { select: { id: true, name: true } } }, orderBy: { createdAt: "desc" } });
+  const assets = await prisma.mediaAsset.findMany({ where: kind ? { kind } : undefined, include: { variants: true, processingJob: { select: { status: true } }, createdBy: { select: { id: true, name: true } } }, orderBy: { createdAt: "desc" } });
   return Promise.all(assets.map(async (asset) => {
     const references = await referenceRows(prisma, asset.id);
     return { ...asset, references, referenceCount: references.length };
@@ -192,6 +192,41 @@ export async function retireMedia(actor: Actor, id: string) {
     const references = await referenceRows(tx, id); if (references.length) throw new AppError("Referenced media cannot be retired.", 409, "MEDIA_REFERENCED", { references });
     const asset = await tx.mediaAsset.update({ where: { id }, data: { status: "RETIRED", retiredAt: new Date() } });
     await tx.mediaAuditLog.create({ data: { mediaAssetId: id, actorId: actor.userId, action: "MEDIA_RETIRE" } }); return asset;
+  });
+}
+
+export async function permanentlyDeleteMedia(actor: Actor, id: string, storage: StorageProvider = mediaStorage) {
+  requirePermission(actor, "media:hard-delete");
+  const asset = await prisma.mediaAsset.findUnique({ where: { id }, include: { variants: true, processingJob: true } });
+  if (!asset) return { id, deleted: false, alreadyDeleted: true, deletedObjectCount: 0 };
+  if (asset.status !== "RETIRED") throw new AppError("Only retired media can be permanently deleted.", 409, "MEDIA_DELETE_NOT_RETIRED");
+  const references = await referenceRows(prisma, id);
+  if (references.length) throw new AppError("Referenced media cannot be permanently deleted.", 409, "MEDIA_REFERENCED", { references });
+  if (asset.processingJob?.status === "RUNNING") throw new AppError("Media with a running processing job cannot be permanently deleted.", 409, "MEDIA_JOB_RUNNING");
+  const storageKeys = [...new Set([asset.sourceStorageKey, ...asset.variants.map(({ storageKey }) => storageKey)].filter((value): value is string => Boolean(value)))];
+  if (storageKeys.length && asset.provider !== storage.kind) throw new AppError("The asset storage provider is not available for deletion.", 409, "MEDIA_STORAGE_PROVIDER_MISMATCH");
+  const storageResults = await Promise.allSettled(storageKeys.map((key) => storage.delete(key)));
+  const storageFailure = storageResults.find((result) => result.status === "rejected");
+  if (storageFailure?.status === "rejected") {
+    logSafeError("media_permanent_delete_storage_failed", storageFailure.reason, { operation: "permanent media deletion", mediaAssetId: id, storageProvider: storage.kind, objectCount: storageKeys.length });
+    throw new AppError("Media storage deletion failed cleanly. The database record was preserved for retry.", 502, "MEDIA_DELETE_STORAGE_FAILED");
+  }
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "media_assets" WHERE id = ${id}::uuid FOR UPDATE`;
+    if (!locked.length) return { id, deleted: false, alreadyDeleted: true, deletedObjectCount: storageKeys.length };
+    const current = await tx.mediaAsset.findUniqueOrThrow({ where: { id }, include: { variants: true, processingJob: true } });
+    if (current.status !== "RETIRED") throw new AppError("Only retired media can be permanently deleted.", 409, "MEDIA_DELETE_NOT_RETIRED");
+    const blockingReferences = await referenceRows(tx, id);
+    if (blockingReferences.length) throw new AppError("Referenced media cannot be permanently deleted.", 409, "MEDIA_REFERENCED", { references: blockingReferences });
+    if (current.processingJob?.status === "RUNNING") throw new AppError("Media with a running processing job cannot be permanently deleted.", 409, "MEDIA_JOB_RUNNING");
+    await tx.mediaAuditLog.create({ data: {
+      mediaAssetId: id, actorId: actor.userId, action: "MEDIA_DELETE",
+      metadata: { mediaAssetId: id, kind: current.kind, formerStatus: current.status, sha256Checksum: current.sha256Checksum, deletedVariantCount: current.variants.length, deletedObjectCount: storageKeys.length },
+    } });
+    await tx.mediaProcessingJob.deleteMany({ where: { mediaAssetId: id } });
+    await tx.mediaVariant.deleteMany({ where: { mediaAssetId: id } });
+    await tx.mediaAsset.delete({ where: { id } });
+    return { id, deleted: true, alreadyDeleted: false, deletedObjectCount: storageKeys.length };
   });
 }
 

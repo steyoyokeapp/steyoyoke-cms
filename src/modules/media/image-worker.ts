@@ -29,6 +29,11 @@ async function claimJob(id: string, now: Date) {
       SELECT id FROM "media_processing_jobs"
       WHERE id = ${id}::uuid
         AND attempts < ${MEDIA_JOB_MAX_ATTEMPTS}
+        AND EXISTS (
+          SELECT 1 FROM "media_assets"
+          WHERE "media_assets".id = "media_processing_jobs"."mediaAssetId"
+            AND "media_assets".status = 'PROCESSING'
+        )
         AND ((status = 'PENDING' AND "availableAt" <= ${now}) OR (status = 'RUNNING' AND "lockedAt" <= ${staleBefore}))
       FOR UPDATE SKIP LOCKED
     `;
@@ -53,7 +58,7 @@ async function recordFailure(job: ClaimedJob, error: unknown) {
         : { status: "PENDING", lockedAt: null, availableAt: retryAt, lastError: message },
     });
     if (!updated.count) return "lease_lost" as const;
-    if (finalAttempt) await tx.mediaAsset.update({ where: { id: job.mediaAssetId }, data: { status: "FAILED", failureReason: "Image representation processing failed." } });
+    if (finalAttempt) await tx.mediaAsset.updateMany({ where: { id: job.mediaAssetId, status: "PROCESSING" }, data: { status: "FAILED", failureReason: "Image representation processing failed." } });
     return finalAttempt ? "failed" as const : "retry_pending" as const;
   });
 }
@@ -62,7 +67,7 @@ async function processJob(job: ClaimedJob, storage: StorageProvider) {
   const workerStartedAtMs = performance.now();
   try {
     const asset = job.mediaAsset;
-    if (asset.kind !== "IMAGE" || !asset.sourceStorageKey || asset.provider !== storage.kind) throw new Error("Image processing job has incompatible source metadata.");
+    if (asset.kind !== "IMAGE" || asset.status !== "PROCESSING" || !asset.sourceStorageKey || asset.provider !== storage.kind) throw new Error("Image processing job has incompatible source metadata or lifecycle state.");
     const sourceReadStartedAtMs = performance.now();
     const bytes = await storage.read(asset.sourceStorageKey);
     const sourceReadMs = performance.now() - sourceReadStartedAtMs;
@@ -91,7 +96,8 @@ async function processJob(job: ClaimedJob, storage: StorageProvider) {
         value.variantKey === expected.variantKey && value.storageKey === expected.storageKey && value.mimeType === expected.mimeType
         && value.byteSize === expected.byteSize && value.sha256Checksum === expected.sha256Checksum && value.width === expected.width && value.height === expected.height));
       if (!complete) throw new Error("Image processing did not persist every required immutable representation.");
-      await tx.mediaAsset.update({ where: { id: asset.id }, data: { status: "READY", failureReason: null, unreferencedAt: new Date() } });
+      const finalized = await tx.mediaAsset.updateMany({ where: { id: asset.id, status: "PROCESSING" }, data: { status: "READY", failureReason: null, unreferencedAt: new Date() } });
+      if (!finalized.count) throw new Error("Image asset lifecycle changed before worker finalization.");
       await tx.mediaProcessingJob.update({ where: { id: job.id }, data: { status: "COMPLETED", lockedAt: null, completedAt: new Date(), lastError: null } });
       await tx.mediaAuditLog.create({ data: { mediaAssetId: asset.id, actorId: asset.createdById, action: "MEDIA_PROCESS", metadata: { variantCount: stored.length, attempt: job.attempts } } });
     });
@@ -127,7 +133,7 @@ export async function runMediaProcessingJobs(options: { limit?: number; mediaAss
   const staleBefore = new Date(now.getTime() - MEDIA_JOB_LOCK_TIMEOUT_MS);
   const candidates = await prisma.mediaProcessingJob.findMany({
     where: {
-      attempts: { lt: MEDIA_JOB_MAX_ATTEMPTS }, ...(options.mediaAssetId ? { mediaAssetId: options.mediaAssetId } : {}),
+      attempts: { lt: MEDIA_JOB_MAX_ATTEMPTS }, mediaAsset: { status: "PROCESSING" }, ...(options.mediaAssetId ? { mediaAssetId: options.mediaAssetId } : {}),
       OR: [{ status: "PENDING", availableAt: { lte: now } }, { status: "RUNNING", lockedAt: { lte: staleBefore } }],
     },
     orderBy: [{ availableAt: "asc" }, { createdAt: "asc" }], take: limit, select: { id: true },

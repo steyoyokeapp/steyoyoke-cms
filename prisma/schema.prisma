@@ -41,6 +41,7 @@ enum AuditAction {
   MEDIA_PURGE
   MEDIA_PROCESS
   MEDIA_RETRY
+  MEDIA_DELETE
 }
 
 enum MediaKind {

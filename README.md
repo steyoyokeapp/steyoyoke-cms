@@ -123,6 +123,8 @@ Run it once per minute in production. Each due catalogue row is checked under `F
 
 Image uploads validate and store the immutable source before returning a `PROCESSING` MediaAsset. A unique PostgreSQL job then generates the six legacy representations asynchronously. Next.js `after()` starts that worker promptly on Vercel, while the scheduler recovers pending or stale jobs if a function stops. Jobs use bounded retries and stale-lock recovery; failed images retain their source and can be retried from the Media library. Keep the scheduler enabled and invoke `POST /api/internal/publish-scheduled` once per minute with its existing bearer secret.
 
+The Media library separates active and retired assets. Retirement is reversible only at the storage level; there is intentionally no restore action because the current record does not preserve whether its prior operational state was `READY` or `FAILED`. ADMIN users can permanently delete only retired, unreferenced assets after explicit confirmation. Owned storage objects are deleted before operational database rows, and an independent `MEDIA_DELETE` audit tombstone remains after the asset row is removed.
+
 ## Compatibility API
 
 Phase 6 implements Artists only:

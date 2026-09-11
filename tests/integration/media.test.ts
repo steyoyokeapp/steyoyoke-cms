@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "@/lib/authorization";
 import { prisma } from "@/lib/prisma";
 import { createArtist, getArtist, publishArtist, updateArtistDraft } from "@/modules/artists/service";
-import { assertReadyArtwork, createAndProcessImage, getMediaReferences, purgeEligibleMedia, readMediaSource, retryImageProcessing } from "@/modules/media/service";
+import { assertReadyArtwork, createAndProcessImage, getMediaReferences, permanentlyDeleteMedia, purgeEligibleMedia, readMediaSource, retireMedia, retryImageProcessing } from "@/modules/media/service";
 import type { StorageProvider } from "@/modules/media/storage";
 import { runMediaProcessingJobs } from "@/modules/media/image-worker";
 import { createPodcast, getPodcast, publishPodcast, updatePodcastDraft } from "@/modules/podcasts/service";
@@ -21,11 +21,11 @@ class MemoryStorage implements StorageProvider {
   async delete(key: string) { this.files.delete(key); }
 }
 
-let editor: Actor; let admin: Actor; let labelId: string; let image: Buffer;
+let editor: Actor; let admin: Actor; let viewer: Actor; let labelId: string; let image: Buffer;
 beforeEach(async () => {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "media_audit_logs", "media_variants", "media_assets", "release_audit_logs", "release_revision_tracks", "release_revisions", "release_tracks", "releases", "podcast_audit_logs", "podcast_chapter_revisions", "podcast_episode_revisions", "podcast_chapters", "podcast_episodes", "track_audit_logs", "track_revisions", "tracks", "audit_logs", "artist_revisions", "artists", "accounts", "sessions", "verifications", "users", "labels" RESTART IDENTITY CASCADE');
-  const editorUser = await prisma.user.create({ data: { name: "Editor", email: "media-editor@test.local", role: "EDITOR", emailVerified: true } }); const adminUser = await prisma.user.create({ data: { name: "Admin", email: "media-admin@test.local", role: "ADMIN", emailVerified: true } });
-  editor = { userId: editorUser.id, role: "EDITOR" }; admin = { userId: adminUser.id, role: "ADMIN" }; labelId = (await prisma.label.create({ data: { name: "Steyoyoke", slug: "steyoyoke", legacyValue: "STEYOYOKE" } })).id;
+  const editorUser = await prisma.user.create({ data: { name: "Editor", email: "media-editor@test.local", role: "EDITOR", emailVerified: true } }); const adminUser = await prisma.user.create({ data: { name: "Admin", email: "media-admin@test.local", role: "ADMIN", emailVerified: true } }); const viewerUser = await prisma.user.create({ data: { name: "Viewer", email: "media-viewer@test.local", role: "VIEWER", emailVerified: true } });
+  editor = { userId: editorUser.id, role: "EDITOR" }; admin = { userId: adminUser.id, role: "ADMIN" }; viewer = { userId: viewerUser.id, role: "VIEWER" }; labelId = (await prisma.label.create({ data: { name: "Steyoyoke", slug: "steyoyoke", legacyValue: "STEYOYOKE" } })).id;
   image = await sharp({ create: { width: 400, height: 500, channels: 3, background: "#7a2255" } }).jpeg().toBuffer();
 });
 afterAll(async () => prisma.$disconnect());
@@ -153,6 +153,53 @@ describe("media service and frozen artwork references", () => {
     await expectProviderIntegrity(prisma.mediaAsset.create({ data: { kind: "AUDIO", status: "READY", provider: "LEGACY_EXTERNAL", legacyAudioId: crypto.randomUUID(), createdById: editor.userId } }));
   });
 
+  it("permanently deletes only an eligible retired asset and preserves an audit tombstone", async () => {
+    const storage = new MemoryStorage("S3_COMPATIBLE"); const asset = await media(storage);
+    await expect(permanentlyDeleteMedia(editor, asset.id, storage)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(permanentlyDeleteMedia(viewer, asset.id, storage)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(permanentlyDeleteMedia(admin, asset.id, storage)).rejects.toMatchObject({ code: "MEDIA_DELETE_NOT_RETIRED" });
+    await retireMedia(admin, asset.id);
+    expect((await readMediaSource(admin, asset.id, storage)).bytes).toEqual(image);
+    await prisma.mediaProcessingJob.update({ where: { mediaAssetId: asset.id }, data: { status: "FAILED" } });
+    expect(await permanentlyDeleteMedia(admin, asset.id, storage)).toMatchObject({ id: asset.id, deleted: true, alreadyDeleted: false, deletedObjectCount: 7 });
+    expect(storage.files.size).toBe(0);
+    expect(await prisma.mediaAsset.findUnique({ where: { id: asset.id } })).toBeNull();
+    expect(await prisma.mediaVariant.count({ where: { mediaAssetId: asset.id } })).toBe(0);
+    expect(await prisma.mediaProcessingJob.count({ where: { mediaAssetId: asset.id } })).toBe(0);
+    expect(await prisma.mediaAuditLog.findFirst({ where: { action: "MEDIA_DELETE", metadata: { path: ["mediaAssetId"], equals: asset.id } } })).toMatchObject({ mediaAssetId: null, actorId: admin.userId, action: "MEDIA_DELETE", metadata: { mediaAssetId: asset.id, kind: "IMAGE", formerStatus: "RETIRED", deletedVariantCount: 6, deletedObjectCount: 7 } });
+    expect(await permanentlyDeleteMedia(admin, asset.id, storage)).toMatchObject({ deleted: false, alreadyDeleted: true });
+  });
+
+  it("preserves the database recovery path when any owned storage deletion fails", async () => {
+    const output = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const storage = new MemoryStorage(); const asset = await media(storage); await retireMedia(admin, asset.id);
+    const remove = storage.delete.bind(storage); let calls = 0;
+    storage.delete = async (key) => { calls += 1; if (calls === 2) throw new Error("storage unavailable"); await remove(key); };
+    await expect(permanentlyDeleteMedia(admin, asset.id, storage)).rejects.toMatchObject({ code: "MEDIA_DELETE_STORAGE_FAILED" });
+    expect(await prisma.mediaAsset.findUnique({ where: { id: asset.id } })).toMatchObject({ status: "RETIRED" });
+    expect(await prisma.mediaVariant.count({ where: { mediaAssetId: asset.id } })).toBe(6);
+    expect(await prisma.mediaProcessingJob.count({ where: { mediaAssetId: asset.id } })).toBe(1);
+    expect(output.mock.calls.some(([line]) => String(line).includes("media_permanent_delete_storage_failed"))).toBe(true);
+    output.mockRestore();
+  });
+
+  it("blocks historical references and running jobs, and a retired asset cannot be resurrected", async () => {
+    const referencedStorage = new MemoryStorage(); const referenced = await media(referencedStorage);
+    const artist = await createArtist(editor, { name: "Historical reference", imageAssetId: referenced.id });
+    await publishArtist(editor, artist.id, { expectedWorkingVersion: 1 });
+    await prisma.mediaAsset.update({ where: { id: referenced.id }, data: { status: "RETIRED", retiredAt: new Date() } });
+    await expect(permanentlyDeleteMedia(admin, referenced.id, referencedStorage)).rejects.toMatchObject({ code: "MEDIA_REFERENCED", details: { references: expect.arrayContaining([expect.objectContaining({ type: "ARTIST_REVISION" })]) } });
+
+    const processingStorage = new MemoryStorage();
+    const processing = await createAndProcessImage(editor, { name: "running.jpg", bytes: image }, processingStorage);
+    await prisma.mediaAsset.update({ where: { id: processing.id }, data: { status: "RETIRED", retiredAt: new Date() } });
+    await prisma.mediaProcessingJob.update({ where: { mediaAssetId: processing.id }, data: { status: "RUNNING", lockedAt: new Date() } });
+    await expect(permanentlyDeleteMedia(admin, processing.id, processingStorage)).rejects.toMatchObject({ code: "MEDIA_JOB_RUNNING" });
+    expect(await runMediaProcessingJobs({ limit: 1, mediaAssetId: processing.id, storage: processingStorage })).toMatchObject({ examined: 0, completed: 0 });
+    expect(await prisma.mediaAsset.findUnique({ where: { id: processing.id } })).toMatchObject({ status: "RETIRED" });
+    expect(await prisma.mediaVariant.count({ where: { mediaAssetId: processing.id } })).toBe(0);
+  });
+
   it("delivers only known virtual legacy variants with immutable cache headers", async () => {
     const asset = await media(localStorage, "route.jpg");
     const response = await getLegacyMedia(new Request(`http://local/assets/uploads/files/512/${asset.compatibilityFilename}`), { params: Promise.resolve({ path: ["512", asset.compatibilityFilename] }) } as never);
@@ -169,7 +216,8 @@ describe("media service and frozen artwork references", () => {
     const audio = await prisma.mediaAsset.create({ data: { kind: "AUDIO", status: "READY", provider: "LOCAL", sourceStorageKey: `tests/${crypto.randomUUID()}.mp3`, legacyAudioId: crypto.randomUUID(), originalFilename: "test.mp3", mimeType: "audio/mpeg", byteSize: 3, sha256Checksum: "c".repeat(64), durationMs: 1000, createdById: editor.userId } });
     const podcast = await createPodcast(editor, { title: "Media Podcast", primaryArtistId: artist.id, labelId, episodeDate: "2026-09-10", artworkAssetId: a.id, audioAssetId: audio.id }); await publishPodcast(editor, podcast.id, { expectedWorkingVersion: 1 }); await updatePodcastDraft(editor, podcast.id, { title: podcast.title, primaryArtistId: artist.id, labelId, episodeDate: "2026-09-10", artworkAssetId: b.id, expectedWorkingVersion: 1 }); expect((await getPodcast(editor, podcast.id)).publishedRevision?.artworkAssetId).toBe(a.id); await publishPodcast(editor, podcast.id, { expectedWorkingVersion: 2 });
     const release = await createRelease(editor, { title: "Media Release", primaryArtistId: artist.id, labelId, releaseDate: "2026-09-10", artworkAssetId: a.id }); await replaceReleaseTracks(editor, release.id, { expectedWorkingVersion: 1, trackIds: [track.id] }); await publishRelease(editor, release.id, { expectedWorkingVersion: 2 }); await updateReleaseDraft(editor, release.id, { title: release.title, primaryArtistId: artist.id, labelId, releaseDate: "2026-09-10", artworkAssetId: b.id, expectedWorkingVersion: 2 }); expect((await getRelease(editor, release.id)).publishedRevision?.artworkAssetId).toBe(a.id); await publishRelease(editor, release.id, { expectedWorkingVersion: 3 }); expect((await getRelease(editor, release.id)).publishedRevision?.artworkAssetId).toBe(b.id);
-    expect((await getMediaReferences(editor, a.id)).some(({ type }) => type.endsWith("REVISION"))).toBe(true);
+    const referenceTypes = new Set([...(await getMediaReferences(editor, a.id)), ...(await getMediaReferences(editor, b.id))].map(({ type }) => type));
+    expect(referenceTypes).toEqual(new Set(["ARTIST_WORKING", "ARTIST_REVISION", "TRACK_WORKING", "TRACK_REVISION", "PODCAST_WORKING", "PODCAST_REVISION", "RELEASE_WORKING", "RELEASE_REVISION"]));
   });
 
   it("allows incomplete drafts but blocks Podcast and Release publication without READY artwork", async () => {

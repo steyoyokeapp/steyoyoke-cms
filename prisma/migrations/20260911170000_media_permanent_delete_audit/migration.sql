@@ -1,0 +1,1 @@
+ALTER TYPE "AuditAction" ADD VALUE 'MEDIA_DELETE';
