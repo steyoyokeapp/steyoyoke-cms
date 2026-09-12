@@ -14,10 +14,18 @@ const milliseconds = (value: number) => Math.round(value * 100) / 100;
 type ClaimedJob = Prisma.MediaProcessingJobGetPayload<{ include: { mediaAsset: true } }>;
 type WorkerDb = PrismaClient | typeof prisma;
 
-async function putImmutable(storage: StorageProvider, key: string, bytes: Buffer, expectedChecksum: string) {
-  try { await storage.put(key, bytes); return "created" as const; }
+export async function putImmutableWithProvenance(storage: StorageProvider, key: string, bytes: Buffer, expectedChecksum: string, ownershipToken?: string) {
+  try {
+    await storage.put(key, bytes, { ownershipToken });
+    return { state: "created" as const, ownedByToken: Boolean(ownershipToken) };
+  }
   catch (error) {
-    try { if (checksum(await storage.read(key)) === expectedChecksum) return "existing" as const; }
+    try {
+      if (checksum(await storage.read(key)) === expectedChecksum) {
+        const storedOwnershipToken = ownershipToken ? await storage.getOwnershipToken(key) : null;
+        return { state: "existing" as const, ownedByToken: Boolean(ownershipToken && storedOwnershipToken === ownershipToken.toLowerCase()) };
+      }
+    }
     catch { /* Preserve the original immutable-write failure. */ }
     throw error;
   }
@@ -64,7 +72,7 @@ async function recordFailure(db: WorkerDb, job: ClaimedJob, error: unknown) {
   });
 }
 
-async function processJob(db: WorkerDb, job: ClaimedJob, storage: StorageProvider, auditMetadata?: Prisma.InputJsonObject) {
+async function processJob(db: WorkerDb, job: ClaimedJob, storage: StorageProvider, auditMetadata?: Prisma.InputJsonObject, storageOwnershipToken?: string) {
   const workerStartedAtMs = performance.now();
   try {
     const asset = job.mediaAsset;
@@ -77,7 +85,7 @@ async function processJob(db: WorkerDb, job: ClaimedJob, storage: StorageProvide
     const variantWrites = await mapWithConcurrency(processed.variants, MEDIA_STORAGE_WRITE_CONCURRENCY, async (variant) => {
       const storageKey = `images/${asset.id}/${variant.variantKey.toLowerCase().replaceAll("_", "-")}.${variant.extension}`;
       const startedAtMs = performance.now();
-      const storageWrite = await putImmutable(storage, storageKey, variant.bytes, variant.sha256Checksum);
+      const storageWrite = await putImmutableWithProvenance(storage, storageKey, variant.bytes, variant.sha256Checksum, storageOwnershipToken);
       return { variant, storageKey, storageWrite, writeMs: performance.now() - startedAtMs };
     });
     const variantData: Prisma.MediaVariantCreateManyInput[] = variantWrites.map(({ variant, storageKey }) => ({
@@ -100,7 +108,13 @@ async function processJob(db: WorkerDb, job: ClaimedJob, storage: StorageProvide
       const finalized = await tx.mediaAsset.updateMany({ where: { id: asset.id, status: "PROCESSING" }, data: { status: "READY", failureReason: null, unreferencedAt: new Date() } });
       if (!finalized.count) throw new Error("Image asset lifecycle changed before worker finalization.");
       await tx.mediaProcessingJob.update({ where: { id: job.id }, data: { status: "COMPLETED", lockedAt: null, completedAt: new Date(), lastError: null } });
-      await tx.mediaAuditLog.create({ data: { mediaAssetId: asset.id, actorId: asset.createdById, action: "MEDIA_PROCESS", metadata: { variantCount: stored.length, attempt: job.attempts, createdStorageKeys: variantWrites.filter(({ storageWrite }) => storageWrite === "created").map(({ storageKey }) => storageKey), ...auditMetadata } } });
+      await tx.mediaAuditLog.create({ data: { mediaAssetId: asset.id, actorId: asset.createdById, action: "MEDIA_PROCESS", metadata: {
+        ...auditMetadata,
+        variantCount: stored.length,
+        attempt: job.attempts,
+        createdStorageKeys: variantWrites.filter(({ storageWrite }) => storageWrite.state === "created").map(({ storageKey }) => storageKey),
+        ...(storageOwnershipToken ? { ownedStorageKeys: variantWrites.filter(({ storageWrite }) => storageWrite.ownedByToken).map(({ storageKey }) => storageKey) } : {}),
+      } } });
     });
     const finalizeMs = performance.now() - finalizeStartedAtMs;
     const storageWriteMs = variantWrites.reduce((sum, value) => sum + value.writeMs, 0);
@@ -127,7 +141,7 @@ async function processJob(db: WorkerDb, job: ClaimedJob, storage: StorageProvide
   }
 }
 
-export async function runMediaProcessingJobs(options: { limit?: number; mediaAssetId?: string; storage?: StorageProvider; now?: Date; db?: WorkerDb; auditMetadata?: Prisma.InputJsonObject } = {}) {
+export async function runMediaProcessingJobs(options: { limit?: number; mediaAssetId?: string; storage?: StorageProvider; now?: Date; db?: WorkerDb; auditMetadata?: Prisma.InputJsonObject; storageOwnershipToken?: string } = {}) {
   const limit = Math.max(1, Math.min(options.limit ?? 5, 25));
   const storage = options.storage ?? mediaStorage;
   const db = options.db ?? prisma;
@@ -143,7 +157,7 @@ export async function runMediaProcessingJobs(options: { limit?: number; mediaAss
   const outcomes: string[] = [];
   for (const candidate of candidates) {
     const claimed = await claimJob(db, candidate.id, now);
-    if (claimed) outcomes.push(await processJob(db, claimed, storage, options.auditMetadata));
+    if (claimed) outcomes.push(await processJob(db, claimed, storage, options.auditMetadata, options.storageOwnershipToken));
   }
   return {
     examined: candidates.length,

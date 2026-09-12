@@ -25,7 +25,16 @@ async function rollbackPlan(runId: string | undefined) {
   if (!runId) throw new Error("rollback-plan requires a migration run UUID.");
   const url = process.env.MIGRATION_PLAN_DATABASE_URL;
   if (!url) throw new Error("MIGRATION_PLAN_DATABASE_URL is required for rollback-plan.");
-  const db = migrationClient(url); try { return await generateRollbackManifest(db, runId); } finally { await db.$disconnect(); }
+  const db = migrationClient(url, 1); let transactionStarted = false;
+  try {
+    await db.$executeRawUnsafe("BEGIN READ ONLY"); transactionStarted = true;
+    const state = await db.$queryRawUnsafe<Array<{ transaction_read_only: string }>>("SHOW transaction_read_only");
+    if (state[0]?.transaction_read_only !== "on") throw new Error("Rollback-plan database transaction is not read-only.");
+    return await generateRollbackManifest(db, runId);
+  } finally {
+    if (transactionStarted) await db.$executeRawUnsafe("ROLLBACK");
+    await db.$disconnect();
+  }
 }
 
 async function controlledImport(scope: MigrationScope) {

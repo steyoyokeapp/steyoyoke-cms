@@ -12,10 +12,23 @@ import { AppError } from "@/lib/errors";
 
 export interface StorageProvider {
   readonly kind: "LOCAL" | "S3_COMPATIBLE";
-  put(key: string, bytes: Buffer): Promise<void>;
+  put(key: string, bytes: Buffer, options?: StoragePutOptions): Promise<void>;
   read(key: string): Promise<Buffer>;
   exists(key: string): Promise<boolean>;
+  getOwnershipToken(key: string): Promise<string | null>;
   delete(key: string): Promise<void>;
+}
+
+export type StoragePutOptions = { ownershipToken?: string };
+
+const OWNERSHIP_METADATA_KEY = "migration-run-id";
+
+function safeOwnershipToken(token: string | undefined) {
+  if (token === undefined) return undefined;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(token)) {
+    throw new AppError("Invalid storage ownership token.", 400, "INVALID_STORAGE_OWNERSHIP_TOKEN");
+  }
+  return token.toLowerCase();
 }
 
 function safeKey(key: string) {
@@ -39,15 +52,28 @@ export class LocalStorageProvider implements StorageProvider {
     return target;
   }
 
-  async put(key: string, bytes: Buffer) {
+  private ownershipPath(key: string) { return `${this.resolve(key)}.migration-owner`; }
+
+  async put(key: string, bytes: Buffer, options: StoragePutOptions = {}) {
     const target = this.resolve(key);
+    const ownershipToken = safeOwnershipToken(options.ownershipToken);
     await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
     await writeFile(target, bytes, { mode: 0o600, flag: "wx" });
+    try {
+      if (ownershipToken) await writeFile(this.ownershipPath(key), ownershipToken, { mode: 0o600, flag: "wx" });
+    } catch (error) {
+      await rm(target, { force: true });
+      throw error;
+    }
   }
 
   async read(key: string) { return readFile(this.resolve(key)); }
   async exists(key: string) { try { await stat(this.resolve(key)); return true; } catch { return false; } }
-  async delete(key: string) { await rm(this.resolve(key), { force: true }); }
+  async getOwnershipToken(key: string) {
+    try { return (await readFile(this.ownershipPath(key), "utf8")).trim() || null; }
+    catch { return null; }
+  }
+  async delete(key: string) { await Promise.all([rm(this.resolve(key), { force: true }), rm(this.ownershipPath(key), { force: true })]); }
 }
 
 type S3Sender = Pick<S3Client, "send">;
@@ -88,13 +114,15 @@ export class S3StorageProvider implements StorageProvider {
     return this.prefix ? `${this.prefix}/${checked}` : checked;
   }
 
-  async put(key: string, bytes: Buffer) {
+  async put(key: string, bytes: Buffer, options: StoragePutOptions = {}) {
+    const ownershipToken = safeOwnershipToken(options.ownershipToken);
     await this.client.send(new PutObjectCommand({
       Bucket: this.options.bucket,
       Key: this.objectKey(key),
       Body: bytes,
       ContentLength: bytes.length,
       IfNoneMatch: "*",
+      ...(ownershipToken ? { Metadata: { [OWNERSHIP_METADATA_KEY]: ownershipToken } } : {}),
     }));
   }
 
@@ -113,6 +141,11 @@ export class S3StorageProvider implements StorageProvider {
       if (candidate.name === "NotFound" || candidate.$metadata?.httpStatusCode === 404) return false;
       throw error;
     }
+  }
+
+  async getOwnershipToken(key: string) {
+    const result = await this.client.send(new HeadObjectCommand({ Bucket: this.options.bucket, Key: this.objectKey(key) }));
+    return result.Metadata?.[OWNERSHIP_METADATA_KEY]?.toLowerCase() ?? null;
   }
 
   async delete(key: string) {

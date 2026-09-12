@@ -8,15 +8,19 @@ import { MigrationConflictError } from "../../scripts/migration/ownership";
 import { buildMigrationPlan } from "../../scripts/migration/plan";
 import { APPROVED_SOURCE_SHA256, MIGRATION_ACTOR, migrationRunId } from "../../scripts/migration/safety";
 import { stableUuid } from "../../scripts/migration/identity";
+import { HISTORICAL_STORAGE_OWNERSHIP_ATTESTATIONS } from "../../scripts/migration/rollback-attestations";
 
 class MemoryStorage implements StorageProvider {
   readonly kind = "LOCAL" as const;
   files = new Map<string, Buffer>();
+  ownershipTokens = new Map<string, string>();
+  putCalls = new Map<string, number>();
   failNextPut = false;
-  async put(key: string, bytes: Buffer) { if (this.failNextPut) { this.failNextPut = false; throw new Error("injected source failure"); } if (this.files.has(key)) throw new Error("immutable collision"); this.files.set(key, bytes); }
+  async put(key: string, bytes: Buffer, options: { ownershipToken?: string } = {}) { this.putCalls.set(key, (this.putCalls.get(key) ?? 0) + 1); if (this.failNextPut) { this.failNextPut = false; throw new Error("injected source failure"); } if (this.files.has(key)) throw new Error("immutable collision"); this.files.set(key, bytes); if (options.ownershipToken) this.ownershipTokens.set(key, options.ownershipToken.toLowerCase()); }
   async read(key: string) { const value = this.files.get(key); if (!value) throw new Error("missing"); return value; }
   async exists(key: string) { return this.files.has(key); }
-  async delete(key: string) { this.files.delete(key); }
+  async getOwnershipToken(key: string) { return this.ownershipTokens.get(key) ?? null; }
+  async delete(key: string) { this.files.delete(key); this.ownershipTokens.delete(key); }
 }
 
 const sample = { artists: [4], tracks: [1329], podcasts: [1283], releases: [47] };
@@ -44,6 +48,11 @@ describe("production-safe migration orchestration", () => {
     expect(await prisma.artist.count()).toBe(1); expect(await prisma.track.count()).toBe(1); expect(await prisma.podcastEpisode.count()).toBe(1); expect(await prisma.release.count()).toBe(1);
     expect(await prisma.mediaAsset.count()).toBe(5); expect(await prisma.mediaVariant.count()).toBe(18); expect(await prisma.mediaProcessingJob.count()).toBe(3);
 
+    const imageRecords = await prisma.migrationRecord.findMany({ where: { runId: first.runId, entityType: "IMAGE" } });
+    const variantRecords = await prisma.migrationRecord.findMany({ where: { runId: first.runId, entityType: "IMAGE_VARIANT" } });
+    expect(imageRecords.every((record) => (record.metadata as { sourceCreatedByRun?: boolean }).sourceCreatedByRun === true)).toBe(true);
+    expect(variantRecords.every((record) => (record.metadata as { storageCreatedByRun?: boolean }).storageCreatedByRun === true)).toBe(true);
+
     const rollback = await generateRollbackManifest(prisma, first.runId);
     expect(rollback.executable).toBe(false);
     expect(rollback.owned).toMatchObject({ artists: expect.any(Array), tracks: expect.any(Array), podcasts: expect.any(Array), releases: expect.any(Array) });
@@ -60,6 +69,27 @@ describe("production-safe migration orchestration", () => {
     expect(result.summary.imported.imageAssets).toBe(3);
     expect(await prisma.mediaAsset.count({ where: { kind: "IMAGE", status: "READY" } })).toBe(3);
     expect(await prisma.mediaAsset.count()).toBe(5);
+  });
+
+  it("adds only the exact checksum-verified historical six-key ownership attestation", async () => {
+    const runId = "0ec15dbc-fe58-5a53-a43a-c2cdfef20f76";
+    const assetId = "f3279f54-268d-55e7-9a64-0fc18ddca2bc";
+    await prisma.user.create({ data: { ...MIGRATION_ACTOR, emailVerified: true } });
+    await prisma.migrationRun.create({ data: { id: runId, sourceSha256: APPROVED_SOURCE_SHA256, scopeKey: "full", toolingVersion: "phase2-production-safe-v1", completedAt: new Date() } });
+    await prisma.mediaAsset.create({ data: { id: assetId, kind: "IMAGE", status: "READY", provider: "S3_COMPATIBLE", sourceStorageKey: `images/${assetId}/source.jpg`, compatibilityFilename: `${assetId}.jpg`, originalFilename: "historical.jpg", mimeType: "image/jpeg", byteSize: 1, sha256Checksum: "f".repeat(64), width: 1, height: 1, createdById: MIGRATION_ACTOR.id } });
+    const variantKeys = ["ORIGINAL", "LEGACY_1440", "LEGACY_1024", "LEGACY_512", "LEGACY_THUMB_256", "LEGACY_THUMB_80"] as const;
+    for (const [index, attestation] of HISTORICAL_STORAGE_OWNERSHIP_ATTESTATIONS.entries()) {
+      const variant = await prisma.mediaVariant.create({ data: { mediaAssetId: assetId, variantKey: variantKeys[index]!, storageKey: attestation.storageKey, mimeType: "image/jpeg", byteSize: 1, sha256Checksum: attestation.sha256Checksum, width: 1, height: 1 } });
+      const sourceIdentity = `historical:${index}`;
+      await prisma.migrationRecord.create({ data: { id: stableUuid("migration-record", `${runId}:IMAGE_VARIANT:${sourceIdentity}`), runId, entityType: "IMAGE_VARIANT", sourceIdentity, canonicalId: variant.id, stage: "READY", status: "COMPLETED", metadata: { createdByRun: true, storageKey: attestation.storageKey, storageCreatedByRun: false } } });
+    }
+
+    const manifest = await generateRollbackManifest(prisma, runId);
+    expect(manifest.owned.storageKeys).toEqual(HISTORICAL_STORAGE_OWNERSHIP_ATTESTATIONS.map(({ storageKey }) => storageKey));
+    const first = HISTORICAL_STORAGE_OWNERSHIP_ATTESTATIONS[0]!;
+    await expect(generateRollbackManifest(prisma, runId, { historicalStorageAttestations: [{ ...first, sha256Checksum: "0".repeat(64) }] })).rejects.toThrow(/Unapproved historical/);
+    await expect(generateRollbackManifest(prisma, runId, { historicalStorageAttestations: [{ ...first, runId: crypto.randomUUID() }] })).rejects.toThrow(/Unapproved historical/);
+    await expect(generateRollbackManifest(prisma, runId, { historicalStorageAttestations: [{ ...first, storageKey: `${first.storageKey}.unrelated` }] })).rejects.toThrow(/Unapproved historical/);
   });
 
   it("fails loudly rather than adopting a conflicting legacy record", async () => {

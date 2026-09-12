@@ -16,14 +16,18 @@ export function historicalImageSourceIdentity(mediaRoot: string, sourcePath: str
 
 export function historicalImageId(sourceIdentity: string) { return stableUuid("historical-image-v2", sourceIdentity); }
 
-async function putOwnedSource(storage: StorageProvider, key: string, bytes: Buffer, expectedChecksum: string) {
+async function putOwnedSource(storage: StorageProvider, key: string, bytes: Buffer, expectedChecksum: string, ownershipToken: string) {
   if (await storage.exists(key)) {
     if (checksum(await storage.read(key)) !== expectedChecksum) throw new Error(`Owned storage key ${key} exists with conflicting content.`);
-    return "existing" as const;
+    return await storage.getOwnershipToken(key) === ownershipToken.toLowerCase() ? "owned-existing" as const : "existing" as const;
   }
-  try { await storage.put(key, bytes); }
+  try { await storage.put(key, bytes, { ownershipToken }); }
   catch (error) {
-    try { if (checksum(await storage.read(key)) === expectedChecksum) return "existing" as const; } catch { /* retain original error */ }
+    try {
+      if (checksum(await storage.read(key)) === expectedChecksum) {
+        return await storage.getOwnershipToken(key) === ownershipToken.toLowerCase() ? "owned-existing" as const : "existing" as const;
+      }
+    } catch { /* retain original error */ }
     throw error;
   }
   return "created" as const;
@@ -68,8 +72,8 @@ export class MigrationMediaImporter {
     }
 
     try {
-      const sourceWrite = await putOwnedSource(this.storage, sourceStorageKey, bytes, inspected.sourceChecksum);
-      await checkpoint(this.db, this.runId, "IMAGE", sourceIdentity, { canonicalId: id, stage: "SOURCE_STORED", status: "PROCESSING", metadata: { sourceStorageKey, sha256Checksum: inspected.sourceChecksum, sourceCreatedByRun: sourceWrite === "created" } });
+      const sourceWrite = await putOwnedSource(this.storage, sourceStorageKey, bytes, inspected.sourceChecksum, this.runId);
+      await checkpoint(this.db, this.runId, "IMAGE", sourceIdentity, { canonicalId: id, stage: "SOURCE_STORED", status: "PROCESSING", metadata: { sourceStorageKey, sha256Checksum: inspected.sourceChecksum, sourceCreatedByRun: sourceWrite !== "existing" } });
       const job = await this.db.mediaProcessingJob.findUnique({ where: { mediaAssetId: id } });
       const jobId = stableUuid("migration-image-job", sourceIdentity);
       if (job && job.id !== jobId) await conflict(this.db, this.runId, "IMAGE_JOB", sourceIdentity, `Historical image job for ${sourceIdentity} has unrelated identity ${job.id}.`, job.id);
@@ -94,7 +98,7 @@ export class MigrationMediaImporter {
       const previousVariantIds = new Set(before?.variants.map(({ id }) => id) ?? []);
       if (record.canonicalId) {
         for (;;) {
-          const result = await runMediaProcessingJobs({ limit: 1, mediaAssetId: record.canonicalId, storage: this.storage, db: this.db, auditMetadata: { migrationRunId: this.runId } });
+          const result = await runMediaProcessingJobs({ limit: 1, mediaAssetId: record.canonicalId, storage: this.storage, db: this.db, auditMetadata: { migrationRunId: this.runId }, storageOwnershipToken: this.runId });
           if (result.examined === 0) break;
           if (result.failed) throw new Error(`${result.failed} historical image processing job(s) failed.`);
         }
@@ -108,8 +112,8 @@ export class MigrationMediaImporter {
       await checkpoint(this.db, this.runId, "IMAGE_JOB", record.sourceIdentity, { canonicalId: asset.processingJob.id, stage: "COMPLETED", status: "COMPLETED" });
       const processAudit = await this.db.mediaAuditLog.findFirst({ where: { mediaAssetId: asset.id, action: "MEDIA_PROCESS" }, orderBy: { createdAt: "desc" } });
       const auditMetadata = processAudit?.metadata && typeof processAudit.metadata === "object" && !Array.isArray(processAudit.metadata) ? processAudit.metadata : {};
-      const createdStorageKeys = new Set(auditMetadata.migrationRunId === this.runId && Array.isArray(auditMetadata.createdStorageKeys) ? auditMetadata.createdStorageKeys.filter((key): key is string => typeof key === "string") : []);
-      for (const variant of asset.variants) await checkpoint(this.db, this.runId, "IMAGE_VARIANT", `${record.sourceIdentity}:${variant.variantKey}`, { canonicalId: variant.id, stage: "READY", status: "COMPLETED", metadata: { createdByRun: !previousVariantIds.has(variant.id), storageKey: variant.storageKey, storageCreatedByRun: createdStorageKeys.has(variant.storageKey) } });
+      const ownedStorageKeys = new Set(auditMetadata.migrationRunId === this.runId && Array.isArray(auditMetadata.ownedStorageKeys) ? auditMetadata.ownedStorageKeys.filter((key): key is string => typeof key === "string") : []);
+      for (const variant of asset.variants) await checkpoint(this.db, this.runId, "IMAGE_VARIANT", `${record.sourceIdentity}:${variant.variantKey}`, { canonicalId: variant.id, stage: "READY", status: "COMPLETED", metadata: { createdByRun: !previousVariantIds.has(variant.id), storageKey: variant.storageKey, storageCreatedByRun: ownedStorageKeys.has(variant.storageKey) } });
     }
   }
 

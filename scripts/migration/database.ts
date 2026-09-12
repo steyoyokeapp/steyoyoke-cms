@@ -5,8 +5,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
 import { REHEARSAL_DATABASE } from "./config";
 
-export function migrationClient(databaseUrl: string) {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, max: 10 }) });
+export function migrationClient(databaseUrl: string, maxConnections = 10) {
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, max: maxConnections }) });
 }
 
 export async function resetRehearsalDatabase(databaseUrl: string) {

@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import { requirePermission } from "@/lib/authorization";
 import { checksum, IMAGE_PROCESSING_CONCURRENCY, IMAGE_VARIANTS, MAX_IMAGE_BYTES, processImage } from "@/modules/media/image";
+import { putImmutableWithProvenance } from "@/modules/media/image-worker";
 import { mapWithConcurrency } from "@/modules/media/concurrency";
 import { LegacyMediaSerializer } from "@/modules/media/legacy";
 import { createStorageProvider, LocalStorageProvider, S3StorageProvider } from "@/modules/media/storage";
@@ -51,20 +52,47 @@ describe("local image processing", () => {
     await expect(storage.read("../secret.jpg")).rejects.toMatchObject({ code: "INVALID_STORAGE_KEY" }); await storage.delete("images/test/source.jpg"); expect(await storage.exists("images/test/source.jpg")).toBe(false);
   });
 
+  it("preserves exact migration ownership across immutable checksum reuse", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "steyoyoke-media-")); roots.push(root); const storage = new LocalStorageProvider(root);
+    const bytes = Buffer.from("same-run"); const expectedChecksum = checksum(bytes);
+    const runA = "0ec15dbc-fe58-5a53-a43a-c2cdfef20f76"; const runB = "dd141c28-37a7-5aa9-9c1d-c14527b3b62b";
+    expect(await putImmutableWithProvenance(storage, "images/id/same.jpg", bytes, expectedChecksum, runA)).toEqual({ state: "created", ownedByToken: true });
+    expect(await putImmutableWithProvenance(storage, "images/id/same.jpg", bytes, expectedChecksum, runA)).toEqual({ state: "existing", ownedByToken: true });
+    expect(await putImmutableWithProvenance(storage, "images/id/same.jpg", bytes, expectedChecksum, runB)).toEqual({ state: "existing", ownedByToken: false });
+
+    await storage.put("images/id/pre-existing.jpg", bytes);
+    expect(await putImmutableWithProvenance(storage, "images/id/pre-existing.jpg", bytes, expectedChecksum, runA)).toEqual({ state: "existing", ownedByToken: false });
+    await expect(putImmutableWithProvenance(storage, "images/id/pre-existing.jpg", Buffer.from("different"), checksum(Buffer.from("different")), runA)).rejects.toThrow();
+    expect(await storage.getOwnershipToken("images/id/pre-existing.jpg")).toBeNull();
+
+    await storage.put("images/id/different-run.jpg", bytes, { ownershipToken: runB });
+    const mixed = await Promise.all([
+      putImmutableWithProvenance(storage, "images/id/same.jpg", bytes, expectedChecksum, runA),
+      putImmutableWithProvenance(storage, "images/id/pre-existing.jpg", bytes, expectedChecksum, runA),
+      putImmutableWithProvenance(storage, "images/id/different-run.jpg", bytes, expectedChecksum, runA),
+      putImmutableWithProvenance(storage, "images/id/new.jpg", bytes, expectedChecksum, runA),
+    ]);
+    expect(mixed.map(({ ownedByToken }) => ownedByToken)).toEqual([true, false, false, true]);
+  });
+
   it("uses private immutable S3-compatible object operations behind the same safe key boundary", async () => {
     const commands: Array<{ name: string; input: Record<string, unknown> }> = [];
     const client = { send: async (command: { constructor: { name: string }; input: Record<string, unknown> }) => {
       commands.push({ name: command.constructor.name, input: command.input });
       if (command.constructor.name === "GetObjectCommand") return { Body: { transformToByteArray: async () => new Uint8Array(Buffer.from("remote")) } };
+      if (command.constructor.name === "HeadObjectCommand") return { Metadata: { "migration-run-id": "0ec15dbc-fe58-5a53-a43a-c2cdfef20f76" } };
       return {};
     } };
     const storage = new S3StorageProvider({ bucket: "staging-media", region: "test", prefix: "/cms-staging/", client: client as never });
-    await storage.put("images/id/source.jpg", Buffer.from("remote"));
+    await storage.put("images/id/source.jpg", Buffer.from("remote"), { ownershipToken: "0ec15dbc-fe58-5a53-a43a-c2cdfef20f76" });
+    await storage.put("images/id/ordinary.jpg", Buffer.from("ordinary"));
     expect((await storage.read("images/id/source.jpg")).toString()).toBe("remote");
     expect(await storage.exists("images/id/source.jpg")).toBe(true);
+    expect(await storage.getOwnershipToken("images/id/source.jpg")).toBe("0ec15dbc-fe58-5a53-a43a-c2cdfef20f76");
     await storage.delete("images/id/source.jpg");
-    expect(commands.map(({ name }) => name)).toEqual(["PutObjectCommand", "GetObjectCommand", "HeadObjectCommand", "DeleteObjectCommand"]);
-    expect(commands[0]!.input).toMatchObject({ Bucket: "staging-media", Key: "cms-staging/images/id/source.jpg", IfNoneMatch: "*" });
+    expect(commands.map(({ name }) => name)).toEqual(["PutObjectCommand", "PutObjectCommand", "GetObjectCommand", "HeadObjectCommand", "HeadObjectCommand", "DeleteObjectCommand"]);
+    expect(commands[0]!.input).toMatchObject({ Bucket: "staging-media", Key: "cms-staging/images/id/source.jpg", IfNoneMatch: "*", Metadata: { "migration-run-id": "0ec15dbc-fe58-5a53-a43a-c2cdfef20f76" } });
+    expect(commands[1]!.input).not.toHaveProperty("Metadata");
     await expect(storage.read("../secret.jpg")).rejects.toMatchObject({ code: "INVALID_STORAGE_KEY" });
   });
 

@@ -6,24 +6,31 @@ import { createArtist, getArtist, publishArtist, updateArtistDraft } from "@/mod
 import { assertReadyArtwork, createAndProcessImage, getMediaReferences, permanentlyDeleteMedia, purgeEligibleMedia, readMediaSource, retireMedia, retryImageProcessing } from "@/modules/media/service";
 import type { StorageProvider } from "@/modules/media/storage";
 import { runMediaProcessingJobs } from "@/modules/media/image-worker";
+import { checksum } from "@/modules/media/image";
 import { createPodcast, getPodcast, publishPodcast, updatePodcastDraft } from "@/modules/podcasts/service";
 import { createRelease, getRelease, publishRelease, replaceReleaseTracks, updateReleaseDraft } from "@/modules/releases/service";
 import { createTrack, getTrack, publishTrack, updateTrackDraft } from "@/modules/tracks/service";
 import { GET as getLegacyMedia } from "@/app/assets/uploads/files/[...path]/route";
 import { localStorage } from "@/modules/media/storage";
+import { MigrationMediaImporter } from "../../scripts/migration/media";
+import { checkpoint } from "../../scripts/migration/ownership";
+import { generateRollbackManifest } from "../../scripts/migration/rollback";
 
 class MemoryStorage implements StorageProvider {
   constructor(readonly kind: "LOCAL" | "S3_COMPATIBLE" = "LOCAL") {}
   files = new Map<string, Buffer>();
-  async put(key: string, bytes: Buffer) { if (this.files.has(key)) throw new Error("immutable collision"); this.files.set(key, bytes); }
+  ownershipTokens = new Map<string, string>();
+  putCalls = new Map<string, number>();
+  async put(key: string, bytes: Buffer, options: { ownershipToken?: string } = {}) { this.putCalls.set(key, (this.putCalls.get(key) ?? 0) + 1); if (this.files.has(key)) throw new Error("immutable collision"); this.files.set(key, bytes); if (options.ownershipToken) this.ownershipTokens.set(key, options.ownershipToken.toLowerCase()); }
   async read(key: string) { const value = this.files.get(key); if (!value) throw new Error("missing"); return value; }
   async exists(key: string) { return this.files.has(key); }
-  async delete(key: string) { this.files.delete(key); }
+  async getOwnershipToken(key: string) { return this.ownershipTokens.get(key) ?? null; }
+  async delete(key: string) { this.files.delete(key); this.ownershipTokens.delete(key); }
 }
 
 let editor: Actor; let admin: Actor; let viewer: Actor; let labelId: string; let image: Buffer;
 beforeEach(async () => {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "media_audit_logs", "media_variants", "media_assets", "release_audit_logs", "release_revision_tracks", "release_revisions", "release_tracks", "releases", "podcast_audit_logs", "podcast_chapter_revisions", "podcast_episode_revisions", "podcast_chapters", "podcast_episodes", "track_audit_logs", "track_revisions", "tracks", "audit_logs", "artist_revisions", "artists", "accounts", "sessions", "verifications", "users", "labels" RESTART IDENTITY CASCADE');
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "migration_records", "migration_issues", "migration_runs", "media_audit_logs", "media_variants", "media_assets", "release_audit_logs", "release_revision_tracks", "release_revisions", "release_tracks", "releases", "podcast_audit_logs", "podcast_chapter_revisions", "podcast_episode_revisions", "podcast_chapters", "podcast_episodes", "track_audit_logs", "track_revisions", "tracks", "audit_logs", "artist_revisions", "artists", "accounts", "sessions", "verifications", "users", "labels" RESTART IDENTITY CASCADE');
   const editorUser = await prisma.user.create({ data: { name: "Editor", email: "media-editor@test.local", role: "EDITOR", emailVerified: true } }); const adminUser = await prisma.user.create({ data: { name: "Admin", email: "media-admin@test.local", role: "ADMIN", emailVerified: true } }); const viewerUser = await prisma.user.create({ data: { name: "Viewer", email: "media-viewer@test.local", role: "VIEWER", emailVerified: true } });
   editor = { userId: editorUser.id, role: "EDITOR" }; admin = { userId: adminUser.id, role: "ADMIN" }; viewer = { userId: viewerUser.id, role: "VIEWER" }; labelId = (await prisma.label.create({ data: { name: "Steyoyoke", slug: "steyoyoke", legacyValue: "STEYOYOKE" } })).id;
   image = await sharp({ create: { width: 400, height: 500, channels: 3, background: "#7a2255" } }).jpeg().toBuffer();
@@ -105,6 +112,38 @@ describe("media service and frozen artwork references", () => {
     expect(await runMediaProcessingJobs({ limit: 1, mediaAssetId: asset.id, storage })).toMatchObject({ examined: 0, completed: 0 });
     expect(await prisma.mediaAuditLog.count({ where: { mediaAssetId: asset.id, action: "MEDIA_PROCESS" } })).toBe(1);
     output.mockRestore();
+  });
+
+  it("preserves migration storage ownership when finalization rolls back and the same run reuses immutable variants", async () => {
+    const storage = new MemoryStorage();
+    const asset = await createAndProcessImage(editor, { name: "finalization-timeout.jpg", bytes: image }, storage);
+    const runId = crypto.randomUUID(); const sourceIdentity = "test/finalization-timeout.jpg:" + checksum(image);
+    await prisma.migrationRun.create({ data: { id: runId, sourceSha256: "a".repeat(64), scopeKey: "test-storage-provenance", toolingVersion: "test" } });
+    await checkpoint(prisma, runId, "IMAGE", sourceIdentity, { canonicalId: asset.id, stage: "JOB_PENDING", status: "PROCESSING", metadata: { createdByRun: true, sourceStorageKey: asset.sourceStorageKey, sourceCreatedByRun: false } });
+
+    let transactions = 0;
+    const failingDb = new Proxy(prisma, { get(target, property, receiver) {
+      if (property === "$transaction") return async (operation: (tx: never) => Promise<unknown>, options?: unknown) => {
+        transactions += 1;
+        if (transactions !== 2) return target.$transaction(operation as never, options as never);
+        return target.$transaction(async (tx) => { await operation(tx as never); throw new Error("injected finalization timeout"); }, options as never);
+      };
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    expect(await runMediaProcessingJobs({ limit: 1, mediaAssetId: asset.id, storage, db: failingDb, storageOwnershipToken: runId, auditMetadata: { migrationRunId: runId } })).toMatchObject({ retryPending: 1 });
+    expect(await prisma.mediaVariant.count({ where: { mediaAssetId: asset.id } })).toBe(0);
+    expect(await prisma.mediaAuditLog.count({ where: { mediaAssetId: asset.id, action: "MEDIA_PROCESS" } })).toBe(0);
+    expect([...storage.files.keys()].filter((key) => !key.includes("/source."))).toHaveLength(6);
+
+    await prisma.mediaProcessingJob.update({ where: { mediaAssetId: asset.id }, data: { availableAt: new Date(0) } });
+    await new MigrationMediaImporter(prisma, storage, editor.userId, runId, process.cwd()).processImages();
+    const variantRecords = await prisma.migrationRecord.findMany({ where: { runId, entityType: "IMAGE_VARIANT" } });
+    expect(variantRecords).toHaveLength(6);
+    expect(variantRecords.every((record) => (record.metadata as { storageCreatedByRun?: boolean }).storageCreatedByRun === true)).toBe(true);
+    expect((await generateRollbackManifest(prisma, runId)).owned.storageKeys).toHaveLength(6);
+    expect([...storage.putCalls.entries()].filter(([key]) => !key.includes("/source.")).every(([, calls]) => calls === 2)).toBe(true);
+    expect([...storage.files.keys()].filter((key) => !key.includes("/source."))).toHaveLength(6);
   });
 
   it("recovers stale claims and keeps concurrent worker invocation idempotent", async () => {
