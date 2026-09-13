@@ -3,12 +3,13 @@ import { headers } from "next/headers";
 import { actorForPage } from "@/lib/session";
 import { getArtist } from "@/modules/artists/service";
 import { ArtistEditor, type ArtistEditorData } from "@/components/artist-editor";
-import { listMediaAssets } from "@/modules/media/service";
+import { listMediaOptions } from "@/modules/media/service";
 
 export default async function ArtistPage({ params }: PageProps<"/admin/artists/[id]">) {
   const actor = await actorForPage(await headers());
   const { id } = await params;
-  const [artist, media] = await Promise.all([getArtist(actor, id), listMediaAssets(actor, "IMAGE")]);
+  const artist = await getArtist(actor, id);
+  const media = await listMediaOptions(actor, "IMAGE", artist.imageAssetId);
   const data: ArtistEditorData = {
     id: artist.id, legacyId: artist.legacyId, name: artist.name, slug: artist.slug,
     shortBio: artist.shortBio, facebookUrl: artist.facebookUrl, imageAssetId: artist.imageAssetId, status: artist.status,

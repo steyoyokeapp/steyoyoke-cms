@@ -2,7 +2,7 @@ import { after } from "next/server";
 import { actorFromHeaders } from "@/lib/session";
 import { errorResponse } from "@/lib/errors";
 import { requireTrustedMutation } from "@/lib/request-security";
-import { MediaKind } from "@/generated/prisma/client";
+import { parseMediaBrowse } from "@/modules/media/browse";
 import { createAndProcessAudio, createAndProcessImage, listMediaAssets } from "@/modules/media/service";
 import { runMediaProcessingJobs } from "@/modules/media/image-worker";
 import { logSafeError } from "@/lib/logger";
@@ -10,7 +10,12 @@ import { logSafeError } from "@/lib/logger";
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  try { const raw = new URL(request.url).searchParams.get("kind"); const kind = raw && Object.values(MediaKind).includes(raw as MediaKind) ? raw as MediaKind : undefined; return Response.json(await listMediaAssets(await actorFromHeaders(request.headers), kind)); } catch (error) { return errorResponse(error); }
+  try {
+    const query = new URL(request.url).searchParams;
+    return Response.json(await listMediaAssets(await actorFromHeaders(request.headers), {
+      ...parseMediaBrowse(query), limit: query.has("limit") ? Number(query.get("limit")) : undefined,
+    }), { headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) { return errorResponse(error); }
 }
 
 export async function POST(request: Request) {

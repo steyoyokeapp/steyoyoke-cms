@@ -257,7 +257,11 @@ export async function getReleaseFormOptions(actor: Actor, attached?: { primaryAr
 }
 
 export async function getReleasePreview(actor: Actor, id: string) {
-  const release = await getRelease(actor, id); const frozenByTrack = new Map(release.publishedRevision?.tracks.map(({ trackRevision }) => [trackRevision.trackId, trackRevision.id]) ?? []);
+  return buildReleasePreview(await getRelease(actor, id));
+}
+
+export function buildReleasePreview(release: Awaited<ReturnType<typeof getRelease>>) {
+  const frozenByTrack = new Map(release.publishedRevision?.tracks.map(({ trackRevision }) => [trackRevision.trackId, trackRevision.id]) ?? []);
   return {
     id: release.id, legacyId: release.legacyId, title: release.title,
     artists: { primary: { id: release.primaryArtist.id, name: release.primaryArtist.name }, secondary: release.secondaryArtist ? { id: release.secondaryArtist.id, name: release.secondaryArtist.name } : null },
@@ -269,7 +273,10 @@ export async function getReleasePreview(actor: Actor, id: string) {
 }
 
 export async function getLegacyReleasePreview(actor: Actor, id: string) {
-  const release = await getRelease(actor, id);
+  return buildLegacyReleasePreview(await getRelease(actor, id));
+}
+
+export function buildLegacyReleasePreview(release: Awaited<ReturnType<typeof getRelease>>) {
   if (!release.releaseDate) return { validation: "Release Date is required before publishing.", releases: [] };
   const snapshot = {
     title: release.title, primaryArtistLegacyId: release.primaryArtist.legacyId, primaryArtistName: release.primaryArtist.publishedRevision?.name ?? release.primaryArtist.name,

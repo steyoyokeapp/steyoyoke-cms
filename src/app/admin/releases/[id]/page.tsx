@@ -3,13 +3,14 @@ import { headers } from "next/headers";
 import { ReleaseEditor, type ReleaseEditorData } from "@/components/release-editor";
 import { actorForPage } from "@/lib/session";
 import { serializeLegacyRelease, serializeLegacyReleaseCompleteTrack } from "@/modules/releases/legacy";
-import { getLegacyReleasePreview, getRelease, getReleaseFormOptions, getReleasePreview } from "@/modules/releases/service";
-import { listMediaAssets } from "@/modules/media/service";
+import { buildLegacyReleasePreview, getRelease, getReleaseFormOptions, buildReleasePreview } from "@/modules/releases/service";
+import { listMediaOptions } from "@/modules/media/service";
 
 const isoDate = (date: Date | null) => date ? date.toISOString().slice(0, 10) : null;
 
 export default async function ReleasePage({ params }: PageProps<"/admin/releases/[id]">) {
-  const actor = await actorForPage(await headers()); const release = await getRelease(actor, (await params).id); const [options, media, canonicalPreview, proposedLegacyPreview] = await Promise.all([getReleaseFormOptions(actor, { primaryArtistId: release.primaryArtistId, secondaryArtistId: release.secondaryArtistId, labelId: release.labelId, trackIds: release.tracks.map(({ trackId }) => trackId) }), listMediaAssets(actor, "IMAGE"), getReleasePreview(actor, release.id), getLegacyReleasePreview(actor, release.id)]);
+  const actor = await actorForPage(await headers()); const release = await getRelease(actor, (await params).id); const [options, media] = await Promise.all([getReleaseFormOptions(actor, { primaryArtistId: release.primaryArtistId, secondaryArtistId: release.secondaryArtistId, labelId: release.labelId, trackIds: release.tracks.map(({ trackId }) => trackId) }), listMediaOptions(actor, "IMAGE", release.artworkAssetId)]);
+  const canonicalPreview = buildReleasePreview(release); const proposedLegacyPreview = buildLegacyReleasePreview(release);
   const published = release.publishedRevision; const publishedLegacyComplete = published ? { releasecomplete: { "0": serializeLegacyRelease(published, release.legacyId, "complete"), tracks: published.tracks.map(({ trackRevision }) => serializeLegacyReleaseCompleteTrack(trackRevision, trackRevision.track.legacyId)) }, base_cover_folder: "/1440/", main_cover_folder: "/assets/uploads/files" } : null;
   const data: ReleaseEditorData = {
     id: release.id, legacyId: release.legacyId, title: release.title, primaryArtistId: release.primaryArtistId, secondaryArtistId: release.secondaryArtistId, labelId: release.labelId, releaseDate: isoDate(release.releaseDate), spotifyUrl: release.spotifyUrl, beatportUrl: release.beatportUrl, traxsourceUrl: release.traxsourceUrl, bandcampUrl: release.bandcampUrl, appleMusicUrl: release.appleMusicUrl, soundcloudUrl: release.soundcloudUrl, artworkAssetId: release.artworkAssetId, status: release.status, workingVersion: release.workingVersion, scheduledFor: release.scheduledFor?.toISOString() ?? null,

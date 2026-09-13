@@ -4,10 +4,10 @@ import { TrackEditor, type TrackEditorData } from "@/components/track-editor";
 import { actorForPage } from "@/lib/session";
 import { serializeLegacyTrack } from "@/modules/tracks/legacy";
 import { getTrack, getTrackFormOptions } from "@/modules/tracks/service";
-import { listMediaAssets } from "@/modules/media/service";
+import { listMediaOptions } from "@/modules/media/service";
 
 export default async function TrackPage({ params }: PageProps<"/admin/tracks/[id]">) {
-  const actor = await actorForPage(await headers()); const track = await getTrack(actor, (await params).id); const [options, media, audio] = await Promise.all([getTrackFormOptions(actor, track), listMediaAssets(actor, "IMAGE"), listMediaAssets(actor, "AUDIO")]);
+  const actor = await actorForPage(await headers()); const track = await getTrack(actor, (await params).id); const [options, media, audio] = await Promise.all([getTrackFormOptions(actor, track), listMediaOptions(actor, "IMAGE", track.artworkAssetId), listMediaOptions(actor, "AUDIO", track.audioAssetId)]);
   const revision = track.publishedRevision;
   const data: TrackEditorData = {
     id: track.id, legacyId: track.legacyId, title: track.title, primaryArtistId: track.primaryArtistId, secondaryArtistId: track.secondaryArtistId, labelId: track.labelId, durationMs: track.durationMs,

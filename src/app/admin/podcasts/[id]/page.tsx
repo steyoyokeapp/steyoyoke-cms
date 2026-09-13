@@ -4,10 +4,10 @@ import { PodcastEditor, type PodcastEditorData } from "@/components/podcast-edit
 import { actorForPage } from "@/lib/session";
 import { serializeLegacyPodcast } from "@/modules/podcasts/legacy";
 import { getPodcast, getPodcastFormOptions } from "@/modules/podcasts/service";
-import { listMediaAssets } from "@/modules/media/service";
+import { listMediaOptions } from "@/modules/media/service";
 
 export default async function PodcastPage({ params }: PageProps<"/admin/podcasts/[id]">) {
-  const actor = await actorForPage(await headers()); const podcast = await getPodcast(actor, (await params).id); const [options, media, audio] = await Promise.all([getPodcastFormOptions(actor, podcast), listMediaAssets(actor, "IMAGE"), listMediaAssets(actor, "AUDIO")]);
+  const actor = await actorForPage(await headers()); const podcast = await getPodcast(actor, (await params).id); const [options, media, audio] = await Promise.all([getPodcastFormOptions(actor, podcast), listMediaOptions(actor, "IMAGE", podcast.artworkAssetId), listMediaOptions(actor, "AUDIO", podcast.audioAssetId)]);
   const revisionData = (revision: NonNullable<typeof podcast.publishedRevision>) => ({ id: revision.id, revisionNumber: revision.revisionNumber, sourceWorkingVersion: revision.sourceWorkingVersion, title: revision.title, primaryArtistName: revision.primaryArtistName, labelName: revision.labelName, chapterCount: revision.chapters.length, createdAt: revision.createdAt.toISOString() });
   const data: PodcastEditorData = { id: podcast.id, legacyId: podcast.legacyId, title: podcast.title, primaryArtistId: podcast.primaryArtistId, secondaryArtistId: podcast.secondaryArtistId, labelId: podcast.labelId, episodeDate: podcast.episodeDate?.toISOString().slice(0,10) ?? "", durationMs: podcast.durationMs, artworkAssetId: podcast.artworkAssetId, audioAssetId: podcast.audioAssetId, status: podcast.status, workingVersion: podcast.workingVersion, scheduledFor: podcast.scheduledFor?.toISOString() ?? null,
     chapters: podcast.chapters.map(({ id, artist, title, legacyReference, durationMs }) => ({ id, artist, title, legacyReference, durationMs })), publishedRevision: podcast.publishedRevision ? revisionData(podcast.publishedRevision) : null, scheduledRevision: podcast.scheduledRevision ? revisionData(podcast.scheduledRevision) : null, revisions: podcast.revisions.map(revisionData), auditLogs: podcast.auditLogs.map((log) => ({ id: log.id, action: log.action, createdAt: log.createdAt.toISOString(), actor: log.actor ? { name: log.actor.name } : null })) };

@@ -10,6 +10,8 @@ import { inspectImage } from "@/modules/media/image";
 import { processAudio } from "@/modules/media/audio";
 import { mediaStorage, type StorageProvider } from "@/modules/media/storage";
 
+import { parseMediaBrowse, type MediaBrowseState } from "@/modules/media/browse";
+
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -93,9 +95,10 @@ export async function createAndProcessAudio(actor: Actor, file: { name: string; 
 
 export async function getMediaAsset(actor: Actor, id: string) {
   requirePermission(actor, "media:read");
-  const asset = await prisma.mediaAsset.findUnique({ where: { id }, include: { variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
+  const asset = await prisma.mediaAsset.findUnique({ where: { id }, include: { processingJob: { select: { status: true } }, variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
   if (!asset) throw new AppError("Media asset not found.", 404, "MEDIA_NOT_FOUND");
-  return { ...asset, references: await getMediaReferences(actor, id) };
+  const references = await getMediaReferences(actor, id);
+  return { ...asset, references, referenceCount: references.length };
 }
 
 export async function readMediaSource(actor: Actor, id: string, storage: StorageProvider = mediaStorage) {
@@ -118,19 +121,58 @@ export async function retryImageProcessing(actor: Actor, id: string) {
       create: { mediaAssetId: id },
       update: { status: "PENDING", attempts: 0, availableAt: new Date(), lockedAt: null, completedAt: null, lastError: null },
     });
-    const processing = await tx.mediaAsset.update({ where: { id }, data: { status: "PROCESSING", failureReason: null }, include: { variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
+    const processing = await tx.mediaAsset.update({ where: { id }, data: { status: "PROCESSING", failureReason: null }, include: { processingJob: { select: { status: true } }, variants: { orderBy: { variantKey: "asc" } }, createdBy: { select: { id: true, name: true } } } });
     await tx.mediaAuditLog.create({ data: { mediaAssetId: id, actorId: actor.userId, action: "MEDIA_RETRY", metadata: { previousStatus: "FAILED" } } });
     return processing;
   });
 }
 
-export async function listMediaAssets(actor: Actor, kind?: MediaKind) {
+// Offer eligible choices plus the attached asset, which must remain visible even if unavailable.
+export async function listMediaOptions(actor: Actor, kind: MediaKind, selectedId?: string | null, db: Db = prisma) {
   requirePermission(actor, "media:read");
-  const assets = await prisma.mediaAsset.findMany({ where: kind ? { kind } : undefined, include: { variants: true, processingJob: { select: { status: true } }, createdBy: { select: { id: true, name: true } } }, orderBy: { createdAt: "desc" } });
-  return Promise.all(assets.map(async (asset) => {
-    const references = await referenceRows(prisma, asset.id);
-    return { ...asset, references, referenceCount: references.length };
+  return db.mediaAsset.findMany({ where: { kind, OR: [
+    { status: { in: kind === "IMAGE" ? ["READY"] : ["READY", "EXTERNAL"] } },
+    ...(selectedId ? [{ id: selectedId }] : []),
+  ] }, select: {
+    id: true, originalFilename: true, compatibilityFilename: true, legacyAudioId: true,
+    width: true, height: true, durationMs: true, status: true,
+  }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+}
+
+export async function listMediaAssets(actor: Actor, options: Partial<MediaBrowseState> & { limit?: number } = {}, db: Db = prisma) {
+  requirePermission(actor, "media:read");
+  const { view, kind, page: requestedPage } = parseMediaBrowse(new URLSearchParams({
+    view: options.view ?? "ACTIVE", kind: options.kind ?? "ALL", page: String(options.page ?? 1),
   }));
+  const limit = Number.isSafeInteger(options.limit) ? Math.max(1, Math.min(50, options.limit!)) : 50;
+  const kindWhere = kind === "ALL" ? {} : { kind };
+  const groups = await db.mediaAsset.groupBy({ by: ["status"], where: kindWhere, _count: { _all: true } });
+  const counts = { active: 0, retired: 0 };
+  for (const group of groups) counts[group.status === "RETIRED" ? "retired" : "active"] += group._count._all;
+  const total = view === "RETIRED" ? counts.retired : counts.active;
+  const pageCount = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(requestedPage, pageCount);
+  const assets = await db.mediaAsset.findMany({
+    where: { ...kindWhere, status: view === "RETIRED" ? "RETIRED" : { not: "RETIRED" } },
+    skip: (page - 1) * limit, take: limit, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: {
+      id: true, kind: true, provider: true, status: true, originalFilename: true, legacyAudioId: true,
+      mimeType: true, byteSize: true, width: true, height: true, durationMs: true, compatibilityFilename: true,
+      sha256Checksum: true, sourceStorageKey: true, failureReason: true, retiredAt: true, createdAt: true,
+      createdBy: { select: { id: true, name: true } }, processingJob: { select: { status: true } },
+      variants: { where: { variantKey: "LEGACY_THUMB_256" }, select: {
+        variantKey: true, width: true, height: true, byteSize: true, sha256Checksum: true, storageKey: true,
+      } },
+      // Prisma folds these relation counts into the page query. No reference rows are materialized.
+      _count: { select: {
+        artistImages: true, artistRevisionImages: true, trackArtwork: true, trackRevisionArtwork: true,
+        trackAudio: true, trackRevisionAudio: true, podcastArtwork: true, podcastRevisionArtwork: true,
+        podcastAudio: true, podcastRevisionAudio: true, releaseArtwork: true, releaseRevisionArtwork: true,
+      } },
+    },
+  });
+  return { items: assets.map(({ _count, ...asset }) => ({ ...asset, referenceCount: Object.values(_count).reduce((sum, count) => sum + count, 0) })),
+    total, page, pageCount, limit, counts };
 }
 
 async function referenceRows(db: Db, id: string) {

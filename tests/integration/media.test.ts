@@ -1,9 +1,18 @@
 import sharp from "sharp";
+import { DatabasePool } from "@/lib/database-pool";
+import ArtistPage from "@/app/admin/artists/[id]/page";
+import TrackPage from "@/app/admin/tracks/[id]/page";
+import PodcastPage from "@/app/admin/podcasts/[id]/page";
+import ReleasePage from "@/app/admin/releases/[id]/page";
+
+const pageActor = vi.hoisted(() => ({ userId: "", role: "VIEWER" as const }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("@/lib/session", () => ({ actorForPage: async () => pageActor }));
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "@/lib/authorization";
 import { prisma } from "@/lib/prisma";
 import { createArtist, getArtist, publishArtist, updateArtistDraft } from "@/modules/artists/service";
-import { assertReadyArtwork, createAndProcessImage, getMediaReferences, permanentlyDeleteMedia, purgeEligibleMedia, readMediaSource, retireMedia, retryImageProcessing } from "@/modules/media/service";
+import { assertReadyArtwork, createAndProcessImage, getMediaReferences, listMediaAssets, listMediaOptions, permanentlyDeleteMedia, purgeEligibleMedia, readMediaSource, retireMedia, retryImageProcessing } from "@/modules/media/service";
 import type { StorageProvider } from "@/modules/media/storage";
 import { runMediaProcessingJobs } from "@/modules/media/image-worker";
 import { checksum } from "@/modules/media/image";
@@ -32,6 +41,7 @@ let editor: Actor; let admin: Actor; let viewer: Actor; let labelId: string; let
 beforeEach(async () => {
   await prisma.$executeRawUnsafe('TRUNCATE TABLE "migration_records", "migration_issues", "migration_runs", "media_audit_logs", "media_variants", "media_assets", "release_audit_logs", "release_revision_tracks", "release_revisions", "release_tracks", "releases", "podcast_audit_logs", "podcast_chapter_revisions", "podcast_episode_revisions", "podcast_chapters", "podcast_episodes", "track_audit_logs", "track_revisions", "tracks", "audit_logs", "artist_revisions", "artists", "accounts", "sessions", "verifications", "users", "labels" RESTART IDENTITY CASCADE');
   const editorUser = await prisma.user.create({ data: { name: "Editor", email: "media-editor@test.local", role: "EDITOR", emailVerified: true } }); const adminUser = await prisma.user.create({ data: { name: "Admin", email: "media-admin@test.local", role: "ADMIN", emailVerified: true } }); const viewerUser = await prisma.user.create({ data: { name: "Viewer", email: "media-viewer@test.local", role: "VIEWER", emailVerified: true } });
+  pageActor.userId = viewerUser.id;
   editor = { userId: editorUser.id, role: "EDITOR" }; admin = { userId: adminUser.id, role: "ADMIN" }; viewer = { userId: viewerUser.id, role: "VIEWER" }; labelId = (await prisma.label.create({ data: { name: "Steyoyoke", slug: "steyoyoke", legacyValue: "STEYOYOKE" } })).id;
   image = await sharp({ create: { width: 400, height: 500, channels: 3, background: "#7a2255" } }).jpeg().toBuffer();
 });
@@ -257,6 +267,29 @@ describe("media service and frozen artwork references", () => {
     const release = await createRelease(editor, { title: "Media Release", primaryArtistId: artist.id, labelId, releaseDate: "2026-09-10", artworkAssetId: a.id }); await replaceReleaseTracks(editor, release.id, { expectedWorkingVersion: 1, trackIds: [track.id] }); await publishRelease(editor, release.id, { expectedWorkingVersion: 2 }); await updateReleaseDraft(editor, release.id, { title: release.title, primaryArtistId: artist.id, labelId, releaseDate: "2026-09-10", artworkAssetId: b.id, expectedWorkingVersion: 2 }); expect((await getRelease(editor, release.id)).publishedRevision?.artworkAssetId).toBe(a.id); await publishRelease(editor, release.id, { expectedWorkingVersion: 3 }); expect((await getRelease(editor, release.id)).publishedRevision?.artworkAssetId).toBe(b.id);
     const referenceTypes = new Set([...(await getMediaReferences(editor, a.id)), ...(await getMediaReferences(editor, b.id))].map(({ type }) => type));
     expect(referenceTypes).toEqual(new Set(["ARTIST_WORKING", "ARTIST_REVISION", "TRACK_WORKING", "TRACK_REVISION", "PODCAST_WORKING", "PODCAST_REVISION", "RELEASE_WORKING", "RELEASE_REVISION"]));
+    const audioTrack = await createTrack(editor, { title: "Audio refs", primaryArtistId: artist.id, labelId, audioAssetId: audio.id });
+    await publishTrack(editor, audioTrack.id, { expectedWorkingVersion: 1 });
+    const listing = await listMediaAssets(viewer);
+    for (const asset of [a, b, audio]) {
+      const exact = await getMediaReferences(viewer, asset.id);
+      expect(listing.items.find(x => x.id === asset.id)?.referenceCount).toBe(exact.length);
+    }
+    expect(new Set((await getMediaReferences(viewer, audio.id)).map(x => x.type))).toEqual(new Set(["TRACK_AUDIO_WORKING", "TRACK_AUDIO_REVISION", "PODCAST_AUDIO_WORKING", "PODCAST_AUDIO_REVISION"]));
+    // No client count is accepted: newly attached media must be blocked at action time.
+    await expect(retireMedia(admin, b.id)).rejects.toMatchObject({ code: "MEDIA_REFERENCED" });
+    const queries = vi.spyOn(DatabasePool.prototype, "query");
+    const pages = [["Artist", ArtistPage, artist.id], ["Track", TrackPage, track.id], ["Podcast", PodcastPage, podcast.id], ["Release", ReleasePage, release.id]] as const;
+    try {
+      const before: number[] = [];
+      for (const [, page, id] of pages) { queries.mockClear(); await page({ params: Promise.resolve({ id }), searchParams: Promise.resolve({}) }); before.push(queries.mock.calls.length); }
+      await prisma.mediaAsset.createMany({ data: Array.from({ length: 3338 }, (_, i) => mediaFixture(i % 2 ? "IMAGE" : "AUDIO", "READY")) });
+      for (const [i, [name, page, id]] of pages.entries()) {
+        queries.mockClear(); await page({ params: Promise.resolve({ id }), searchParams: Promise.resolve({}) });
+        expect(queries.mock.calls.length).toBe(before[i]); expect(queries.mock.calls.length).toBeLessThan(50);
+        console.info(`${name} detail SQL queries before/after 3338 extra assets:`, before[i], queries.mock.calls.length);
+      }
+    } finally { queries.mockRestore(); }
+
   });
 
   it("allows incomplete drafts but blocks Podcast and Release publication without READY artwork", async () => {
@@ -269,5 +302,73 @@ describe("media service and frozen artwork references", () => {
     const storage = new MemoryStorage(); const asset = await media(storage); const created = asset.unreferencedAt!;
     expect(await purgeEligibleMedia(admin, new Date(created.getTime() + 30 * 86400000 - 1), storage)).toEqual({ examined: 0, purged: 0 }); expect(await purgeEligibleMedia(admin, new Date(created.getTime() + 31 * 86400000), storage)).toEqual({ examined: 1, purged: 1 }); expect(storage.files.size).toBe(0); expect(await prisma.mediaAsset.findUnique({ where: { id: asset.id } })).toBeNull();
     expect(await prisma.mediaAuditLog.findFirst({ where: { action: "MEDIA_PURGE", metadata: { path: ["mediaAssetId"], equals: asset.id } } })).toMatchObject({ mediaAssetId: null, action: "MEDIA_PURGE" });
+  });
+});
+
+
+function mediaFixture(kind: "IMAGE" | "AUDIO", status: "READY" | "RETIRED" | "EXTERNAL" | "PROCESSING" | "FAILED") {
+  const id = crypto.randomUUID();
+  if (status === "EXTERNAL") return { id, kind, status, provider: "LEGACY_EXTERNAL" as const, legacyAudioId: id, createdById: editor.userId };
+  return { id, kind, status, provider: "LOCAL" as const, sourceStorageKey: `tests/${id}`, originalFilename: id,
+    mimeType: kind === "IMAGE" ? "image/jpeg" : "audio/mpeg", byteSize: 100, sha256Checksum: "c".repeat(64),
+    compatibilityFilename: kind === "IMAGE" ? `${id}.jpg` : null, legacyAudioId: kind === "AUDIO" ? id : null,
+    width: kind === "IMAGE" ? 100 : null, height: kind === "IMAGE" ? 100 : null, durationMs: kind === "AUDIO" ? 1000 : null, createdById: editor.userId };
+}
+
+describe("bounded media queries", () => {
+  it("filters and paginates in SQL, caps limits, and never enumerates references", async () => {
+    await prisma.mediaAsset.createMany({ data: Array.from({ length: 120 }, (_, i) => ({
+      ...mediaFixture(i % 2 ? "IMAGE" : "AUDIO", i < 20 ? "RETIRED" : "READY"), originalFilename: `page-${i}`, createdAt: new Date(2026, 0, 1),
+    })) });
+    const references = vi.spyOn(prisma.artist, "findMany");
+    const queries = vi.spyOn(DatabasePool.prototype, "query");
+    try {
+      const small = await listMediaAssets(viewer, { limit: 5 }); const smallCount = queries.mock.calls.length;
+      queries.mockClear();
+      const first = await listMediaAssets(viewer); const firstCount = queries.mock.calls.length;
+      expect(first).toMatchObject({ total: 100, page: 1, pageCount: 2, counts: { active: 100, retired: 20 } });
+      expect(first.items).toHaveLength(50); expect(small.items).toHaveLength(5);
+      expect(firstCount).toBe(smallCount); expect(firstCount).toBeLessThan(10);
+      const second = await listMediaAssets(viewer, { page: 2 });
+      expect(new Set([...first.items, ...second.items].map(x => x.id)).size).toBe(100);
+      expect(first.items.every(x => x.status !== "RETIRED" && x.referenceCount === 0 && !("references" in x))).toBe(true);
+      expect((await listMediaAssets(viewer, { limit: 10000 })).items).toHaveLength(50);
+      expect((await listMediaAssets(viewer, { page: 10000 })).page).toBe(2);
+      for (const kind of ["IMAGE", "AUDIO"] as const) {
+        const active = await listMediaAssets(viewer, { kind });
+        expect(active.items).toHaveLength(50); expect(active.items.every(x => x.kind === kind && x.status === "READY")).toBe(true);
+        const retired = await listMediaAssets(viewer, { view: "RETIRED", kind });
+        expect(retired.items).toHaveLength(10); expect(retired.items.every(x => x.kind === kind && x.status === "RETIRED")).toBe(true);
+      }
+      expect(references).not.toHaveBeenCalled();
+      await prisma.mediaAsset.createMany({ data: Array.from({ length: 3218 }, () => mediaFixture("IMAGE", "READY")) });
+      queries.mockClear();
+      const productionScale = await listMediaAssets(viewer);
+      expect(productionScale.items).toHaveLength(50);
+      expect(productionScale.total).toBe(3318); // 3338 assets, of which 20 are retired.
+      expect(queries.mock.calls.length).toBe(firstCount);
+      expect(references).not.toHaveBeenCalled();
+      console.info("Media SQL queries (5 rows / 50 rows / 3338 assets):", smallCount, firstCount, queries.mock.calls.length);
+    } finally { queries.mockRestore(); references.mockRestore(); }
+  });
+
+  it("offers eligible picker media while retaining an unavailable attached asset", async () => {
+    const rows = [];
+    for (const kind of ["IMAGE", "AUDIO"] as const) for (const status of ["READY", "EXTERNAL", "PROCESSING", "FAILED", "RETIRED"] as const) {
+      if (kind === "IMAGE" && status === "EXTERNAL") continue;
+      rows.push(await prisma.mediaAsset.create({ data: mediaFixture(kind, status) }));
+    }
+    const queries = vi.spyOn(DatabasePool.prototype, "query");
+    try {
+      const images = await listMediaOptions(viewer, "IMAGE");
+      expect(queries).toHaveBeenCalledTimes(1); expect(images).toHaveLength(1); expect(images[0]!.status).toBe("READY");
+      const audio = await listMediaOptions(viewer, "AUDIO");
+      expect(audio.map(x => x.status).sort()).toEqual(["EXTERNAL", "READY"]);
+      const retired = rows.find(x => x.kind === "IMAGE" && x.status === "RETIRED")!;
+      const attached = await listMediaOptions(viewer, "IMAGE", retired.id);
+      expect(attached.map(x => x.id)).toContain(retired.id); expect(attached).toHaveLength(2);
+      expect((await listMediaOptions(viewer, "AUDIO", retired.id)).map(x => x.id)).not.toContain(retired.id);
+      expect(attached.every(x => !("references" in x) && !("variants" in x) && !("referenceCount" in x))).toBe(true);
+    } finally { queries.mockRestore(); }
   });
 });
