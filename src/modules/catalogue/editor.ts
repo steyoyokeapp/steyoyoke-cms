@@ -45,14 +45,10 @@ const audio = {
 } as const;
 export const editorSelect = {
   artists: {
-    ...state,
-    _count: { select: { revisions: true } },
+    id: true,
     name: true,
-    slug: true,
-    shortBio: true,
-    facebookUrl: true,
-    imageAssetId: true,
-    imageAsset: { select: mediaChoiceSelect },
+    status: true,
+    workingVersion: true,
   },
   tracks: {
     ...state,
@@ -115,20 +111,11 @@ const date = (x: Date | null) => x?.toISOString() ?? null;
 export async function artistEditor(actor: Actor, id: string) {
   requirePermission(actor, "artist:read");
   return measureRead("artists.detail", async () => {
-    const { imageAsset, _count, ...r } = found(
-      await prisma.artist.findUnique({
-        where: { id },
-        select: editorSelect.artists,
-      }),
-    );
-    return {
-      artist: {
-        ...r,
-        revisionCount: _count.revisions,
-        scheduledFor: date(r.scheduledFor),
-      },
-      mediaAssets: imageAsset ? [imageAsset] : [],
-    };
+    const artist = found(await prisma.artist.findUnique({
+      where: { id },
+      select: editorSelect.artists,
+    }));
+    return { artist };
   });
 }
 export async function trackEditor(actor: Actor, id: string) {

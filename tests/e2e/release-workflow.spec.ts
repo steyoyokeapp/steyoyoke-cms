@@ -1,4 +1,5 @@
-import {mutateAndReload,choose} from "./performance-helpers";
+import { createPublishedArtist } from "./artist-fixtures";
+import {choose} from "./performance-helpers";
 import { expect, test, type Page } from "@playwright/test";
 
 async function signIn(page: Page, email: string, password: string) {
@@ -32,7 +33,7 @@ test("Editor completes Release publication with exact TrackRevision freezing", a
   const suffix = Date.now(); const artistName = `Release E2E Artist ${suffix}`; const releaseTitle = `Steyoyoke Release E2E ${suffix}`; const draftTitle = `Release E2E Updated ${suffix}`; const trackATitle = `Release Track A ${suffix}`; const trackARevision2 = `${trackATitle} r2`; const trackBTitle = `Release Track B ${suffix}`; const apiKey = process.env.LEGACY_API_KEY_A!;
   await signIn(page, process.env.SEED_EDITOR_EMAIL!, process.env.SEED_EDITOR_PASSWORD!);
   const artworkId = await uploadArtwork(page, `release-${suffix}.png`);
-  await page.getByRole("link", { name: "New artist" }).click(); await page.getByLabel("Artist name").fill(artistName); await page.getByRole("button", { name: "Create draft" }).click(); await expect(page).toHaveURL(/\/admin\/artists\/[0-9a-f-]+(?:\?.*)?$/); await mutateAndReload(page,"Publish now"); await expect(page.locator(".summary-strip")).toContainText("PUBLISHED");
+  await createPublishedArtist(page, artistName);
   const trackAId = await createPublishedTrack(page, artistName, trackATitle); const trackBId = await createPublishedTrack(page, artistName, trackBTitle);
   await page.getByRole("link", { name: "Releases", exact: true }).click(); await expect(page).toHaveURL(/\/admin\/releases$/); await page.getByRole("link", { name: "Create Release" }).click(); await expect(page).toHaveURL(/\/admin\/releases\/new$/); await page.getByLabel("Title").fill(releaseTitle); await page.getByLabel("Search Primary Artist").fill(artistName); const releaseArtistValue = await page.getByLabel("Primary Artist", {exact:true}).locator("option").filter({ hasText: artistName }).getAttribute("value"); await page.getByLabel("Primary Artist", {exact:true}).selectOption(releaseArtistValue!); await page.getByLabel("Label").selectOption({ label: "Inner Symphony" }); await page.getByLabel("Release Date").fill("2026-07-08"); await page.getByRole("button", { name: "Create draft" }).click();
   await expect(page).toHaveURL(/\/admin\/releases\/[0-9a-f-]+(?:\?.*)?$/); const releaseUrl = page.url(); const legacyId = await page.locator(".summary-strip .mono").first().textContent();

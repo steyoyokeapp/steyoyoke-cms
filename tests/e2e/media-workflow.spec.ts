@@ -1,4 +1,4 @@
-import {mutateAndReload,openPreview,choose} from "./performance-helpers";
+import { artistAction, createPublishedArtist } from "./artist-fixtures";
 import { expect, test, type Page } from "@playwright/test";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
@@ -21,10 +21,23 @@ test("Editor uploads local images and Artist delivery follows frozen artwork rev
   continueUpload(); await upload; await expect(optimistic).toHaveCount(0); await page.unroute("**/api/admin/media");
   await expect(page.getByText(firstName, { exact: true })).toBeVisible(); await expect(page.locator(".media-card").first()).toContainText("READY"); await expect.poll(() => page.evaluate(() => (window as unknown as { __mediaObjectUrls: { revoked: string[] } }).__mediaObjectUrls.revoked.length)).toBe(1); await expect(page.locator(".preview")).toContainText("ORIGINAL"); await expect(page.locator(".preview")).toContainText("LEGACY_THUMB_80");
   const { items: assets } = await (await page.request.get("/api/admin/media")).json(); const first = assets.find((asset: { originalFilename: string }) => asset.originalFilename === firstName); expect(first).toBeTruthy();
-  await page.getByRole("link", { name: "Artists", exact: true }).click(); await page.getByRole("link", { name: "New artist" }).click(); await page.getByLabel("Artist name").fill(artistName); await page.getByRole("button", { name: "Create draft" }).click(); await choose(page,"Artwork",first.id); await mutateAndReload(page,"Save draft"); const legacyId = await page.locator(".summary-strip .mono").first().textContent(); await mutateAndReload(page,"Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(first.compatibilityFilename);
-  let legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(first.compatibilityFilename); expect((await page.request.get(legacy.image)).ok()).toBe(true);
-  await page.locator('.media-picker input[type="file"]').setInputFiles({ name: secondName, mimeType: "image/png", buffer: png }); await expect(page.getByText(secondName, { exact: true })).toBeVisible(); const second = (await (await page.request.get("/api/admin/media")).json()).items.find((asset: { originalFilename: string }) => asset.originalFilename === secondName); expect(second).toBeTruthy(); await mutateAndReload(page,"Save draft");
-  legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(first.compatibilityFilename); await mutateAndReload(page,"Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(second.compatibilityFilename); legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(second.compatibilityFilename); expect(errors).toEqual([]);
+  const artist = await createPublishedArtist(page, artistName, first.id);
+  const legacyId = artist.legacyId;
+  let legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0];
+  expect(legacy.image).toContain(first.compatibilityFilename);
+  expect((await page.request.get(legacy.image)).ok()).toBe(true);
+  await page.getByText("Upload image", { exact: true }).locator("input").setInputFiles({ name: secondName, mimeType: "image/png", buffer: png });
+  await expect(page.getByText(secondName, { exact: true })).toBeVisible();
+  const second = (await (await page.request.get("/api/admin/media")).json()).items.find((asset: { originalFilename: string }) => asset.originalFilename === secondName);
+  expect(second).toBeTruthy();
+  const changed = await page.request.patch(`/api/admin/artists/${artist.id}`, { headers: { Origin: new URL(page.url()).origin }, data: { name: artistName, imageAssetId: second.id, expectedWorkingVersion: 1 } });
+  expect(changed.ok()).toBe(true);
+  legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0];
+  expect(legacy.image).toContain(first.compatibilityFilename);
+  await artistAction(page, artist.id, "publish", 2);
+  legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0];
+  expect(legacy.image).toContain(second.compatibilityFilename);
+  expect(errors).toEqual([]);
 });
 
 test("Optimistic failure is removed and its local preview URL is revoked", async ({ page }) => {
@@ -84,9 +97,9 @@ test("Media pagination and lazy details discard stale selections and retain brow
   await page.goto("/admin/media");
   // Initial page is streamed from the server; exercise the mocked client refresh on a filter transition.
   await page.getByRole("tab",{name:/Retired/}).click();
-  await expect(page.getByRole("status")).toContainText("0 results");
+  await expect(page.locator(".media-library-panel").getByRole("status")).toContainText("0 results");
   await page.getByRole("tab",{name:/Active/}).click();
-  await expect(page.getByRole("status")).toContainText("51 results");
+  await expect(page.locator(".media-library-panel").getByRole("status")).toContainText("51 results");
   expect(detailRequests).toEqual([]); await expect(page.locator(".media-detail")).toHaveCount(0);
   await page.locator(".media-card").filter({ hasText: "Asset A" }).click();
   await expect.poll(() => detailRequests).toEqual([a]);
@@ -96,12 +109,12 @@ test("Media pagination and lazy details discard stale selections and retain brow
   await page.getByRole("button", { name: "Next", exact: true }).click();
   await expect(page).toHaveURL(/page=2/); await expect(page.locator(".media-detail")).toHaveCount(0);
   await page.getByRole("tab", { name: /Retired/ }).click();
-  await expect(page).toHaveURL(/view=retired$/); await expect(page.getByRole("status")).toContainText("0 results");
+  await expect(page).toHaveURL(/view=retired$/); await expect(page.locator(".media-library-panel").getByRole("status")).toContainText("0 results");
   delayPageTwo = false; releasePageTwo();
   await expect(page.locator(".media-card")).toHaveCount(0);
   await page.goBack(); await expect(page).toHaveURL(/page=2/); await expect(page.locator(".media-card")).toContainText("Page two");
   await page.getByLabel("Kind filter").selectOption("AUDIO");
-  await expect(page).toHaveURL(/kind=AUDIO$/); await expect(page.getByRole("status")).toContainText("Page 1 of 2");
+  await expect(page).toHaveURL(/kind=AUDIO$/); await expect(page.locator(".media-library-panel").getByRole("status")).toContainText("Page 1 of 2");
   await expect(page.locator(".media-detail")).toHaveCount(0); expect(detailRequests).toEqual([a, b]);
   // Clicking the current lifecycle tab must not strand the list in a loading state.
   await page.getByRole("tab", { name: /Active/ }).click(); await expect(page.getByRole("button", { name: "Next", exact: true })).toBeEnabled();

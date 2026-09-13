@@ -1,4 +1,5 @@
-import {mutateAndReload,openPreview,choose} from "./performance-helpers";
+import { createPublishedArtist } from "./artist-fixtures";
+import {openPreview,choose} from "./performance-helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { testMp3 } from "../fixtures/audio";
 
@@ -29,7 +30,7 @@ test("Editor completes the structured Podcast publication lifecycle", async ({ p
   const suffix = Date.now(); const artistName = `Podcast E2E Artist ${suffix}`; const originalTitle = `Steyoyoke Podcast E2E ${suffix}`; const draftTitle = `Podcast E2E Updated ${suffix}`; const apiKey = process.env.LEGACY_API_KEY_A!;
   await signIn(page, process.env.SEED_EDITOR_EMAIL!, process.env.SEED_EDITOR_PASSWORD!);
   const artworkId = await uploadArtwork(page, `podcast-${suffix}.png`); const audioId = await uploadAudio(page, `podcast-${suffix}.mp3`);
-  await page.getByRole("link", { name: "New artist" }).click(); await page.getByLabel("Artist name").fill(artistName); await page.getByRole("button", { name: "Create draft" }).click(); await mutateAndReload(page,"Publish now"); await expect(page.locator(".summary-strip")).toContainText("PUBLISHED");
+  await createPublishedArtist(page, artistName);
   await page.getByRole("link", { name: "Podcasts", exact: true }).click(); await page.getByRole("link", { name: "Create Podcast" }).click(); await page.getByLabel("Title").fill(originalTitle); await page.getByLabel("Search Primary Artist").fill(artistName); const podcastArtistValue = await page.getByLabel("Primary Artist", {exact:true}).locator("option").filter({ hasText: artistName }).getAttribute("value"); await page.getByLabel("Primary Artist", {exact:true}).selectOption(podcastArtistValue!); await page.getByLabel("Label").selectOption({ label: "Inner Symphony" }); await page.getByLabel("Episode Date").fill("2026-07-08"); await page.getByLabel("Duration").fill("01:03:45"); await page.getByRole("button", { name: "Create draft" }).click();
   await expect(page).toHaveURL(/\/admin\/podcasts\/[0-9a-f-]+(?:\?.*)?$/); const legacyId = await page.locator(".summary-strip .mono").first().textContent(); await page.getByRole("button", { name: "Publish now" }).click(); await expect(page.locator(".alert.error")).toContainText("Artwork is required"); await choose(page,"Artwork",artworkId); await page.getByRole("button", { name: "Add Chapter" }).click(); await page.getByRole("button", { name: "Add Chapter" }).click();
   await page.getByLabel("Chapter 1 Artist").fill("Opening Artist"); await page.getByLabel("Chapter 1 Title").fill("Opening Track"); await page.getByLabel("Chapter 1 Legacy Reference").fill("OPEN-1");

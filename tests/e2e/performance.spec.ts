@@ -60,9 +60,8 @@ test("initial navigation bounds data, defers history, and streams Media without 
     if (await rows.count()) {
       const detailStart = Date.now();
       await rows.first().click();
-      await expect(
-        page.getByRole("button", { name: "Revision history", exact: true }),
-      ).toBeVisible();
+      if (kind === "Artists") await expect(page.getByLabel("Artist name")).toBeVisible();
+      else await expect(page.getByRole("button", { name: "Revision history", exact: true })).toBeVisible();
       timings.push({ page: kind + " detail", ms: Date.now() - detailStart });
       expect(await page.locator("select option").count()).toBeLessThan(40);
       await expect(page.getByTestId("canonical-preview")).toHaveCount(0);
@@ -158,13 +157,8 @@ test("history is authenticated and bounded, external audio is excluded, and filt
   const row = page.locator("a.table-row").first();
   await expect(row).toBeVisible();
   await row.click();
-  await expect(
-    page.getByRole("button", { name: "Revision history", exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Revision history", exact: true })
-    .click();
-  await expect(page.getByText("Loading Revision history…")).toHaveCount(0);
+  await expect(page.getByLabel("Artist name")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Revision history", exact: true })).toHaveCount(0);
   const id = new URL(page.url()).pathname.split("/").at(-1)!;
   const history = await page.request.get(
     `/api/admin/secondary?kind=artists&id=${id}&section=history`,

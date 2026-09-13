@@ -122,7 +122,7 @@ it("bounded history pages preserve older immutable revisions and scoped snapshot
     await publishArtist(actor, a.id, { expectedWorkingVersion: v });
   }
   const initial = await artistEditor(actor, a.id);
-  expect(initial.artist.revisionCount).toBe(27);
+  expect(Object.keys(initial.artist).sort()).toEqual(["id", "name", "status", "workingVersion"]);
   expect(initial.artist).not.toHaveProperty("revisions");
   const first = (await secondaryData(actor, {
     kind: "artists",

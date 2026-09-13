@@ -1,3 +1,4 @@
+import { createPublishedArtist } from "./artist-fixtures";
 import {mutateAndReload,openPreview} from "./performance-helpers";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -8,7 +9,7 @@ async function signIn(page: Page, email: string, password: string) {
 test("Editor completes the Track draft isolation lifecycle", async ({ page }) => {
   const suffix = Date.now(); const artistName = `Track E2E Artist ${suffix}`; const publishedTitle = `Track E2E ${suffix}`; const draftTitle = `Track E2E Draft ${suffix}`; const apiKey = process.env.LEGACY_API_KEY_A!;
   await signIn(page, process.env.SEED_EDITOR_EMAIL!, process.env.SEED_EDITOR_PASSWORD!);
-  await page.getByRole("link", { name: "New artist" }).click(); await page.getByLabel("Artist name").fill(artistName); await page.getByRole("button", { name: "Create draft" }).click(); await mutateAndReload(page,"Publish now");
+  await createPublishedArtist(page, artistName);
   await page.getByRole("link", { name: "Tracks", exact: true }).click(); await page.getByRole("link", { name: "Create Track" }).click();
   await page.getByLabel("Title").fill(publishedTitle); await page.getByLabel("Search Primary Artist").fill(artistName); await page.getByLabel("Primary Artist", {exact:true}).selectOption({ index: 1 }); await page.getByLabel("Label").selectOption({ label: "Steyoyoke" }); await page.getByLabel("Duration").fill("03:45"); await page.getByRole("button", { name: "Create draft" }).click();
   await expect(page).toHaveURL(/\/admin\/tracks\/[0-9a-f-]+(?:\?.*)?$/); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toHaveText("null"); const legacyId = await page.locator(".summary-strip .mono").first().textContent();

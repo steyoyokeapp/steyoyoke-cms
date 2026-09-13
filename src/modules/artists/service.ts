@@ -145,14 +145,17 @@ export async function updateArtistDraft(actor: Actor, id: string, input: unknown
       const artist = await lockArtist(tx, id);
       assertEditable(artist);
       assertVersion(artist, data.expectedWorkingVersion);
-      const slug = await availableSlug(tx, data.slug || data.name, artist.id);
+      // Name-only edits must not rewrite compatibility URLs or hidden metadata.
+      const slug = data.slug === undefined
+        ? artist.slug
+        : await availableSlug(tx, data.slug || data.name, artist.id);
       const updated = await tx.artist.update({
         where: { id },
         data: {
           name: data.name,
           slug,
-          shortBio: trimNullable(data.shortBio),
-          facebookUrl: trimNullable(data.facebookUrl),
+          shortBio: data.shortBio === undefined ? artist.shortBio : trimNullable(data.shortBio),
+          facebookUrl: data.facebookUrl === undefined ? artist.facebookUrl : trimNullable(data.facebookUrl),
           imageAssetId: data.imageAssetId === undefined ? artist.imageAssetId : data.imageAssetId || null,
           workingVersion: { increment: 1 },
         },

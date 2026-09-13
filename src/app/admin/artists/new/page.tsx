@@ -10,7 +10,7 @@ export default async function NewArtistPage() {
   return (
     <>
       <Link className="back-link" href="/admin/artists">← Artists</Link>
-      <section className="page-heading"><div><div className="eyebrow">New draft</div><h1>Create artist</h1></div></section>
+      <section className="page-heading"><div><h1>Create artist</h1></div></section>
       <ArtistCreateForm />
     </>
   );

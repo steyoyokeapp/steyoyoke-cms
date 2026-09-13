@@ -44,6 +44,32 @@ describe("artist publication service", () => {
     expect(second.slug).toBe("ame-2");
   });
 
+  it("preserves hidden metadata, identity and frozen history on name-only saves", async () => {
+    const image = await prisma.mediaAsset.create({ data: { kind: "IMAGE", provider: "LOCAL", status: "READY", createdById: admin.userId, compatibilityFilename: "preserved.jpg", sourceStorageKey: "test/preserved.jpg", originalFilename: "preserved.jpg", mimeType: "image/jpeg", byteSize: 1, sha256Checksum: "0".repeat(64) } });
+    const artist = await createArtist(editor, { name: "Original", slug: "stable-custom-url", shortBio: "Historical biography", facebookUrl: "https://facebook.com/original", imageAssetId: image.id });
+    await publishArtist(editor, artist.id, { expectedWorkingVersion: 1 });
+    const saved = await updateArtistDraft(editor, artist.id, { name: "  Renamed Artist  ", expectedWorkingVersion: 1 });
+    expect(saved).toMatchObject({ name: "Renamed Artist", slug: artist.slug, legacyId: artist.legacyId, shortBio: artist.shortBio, facebookUrl: artist.facebookUrl, imageAssetId: image.id, workingVersion: 2 });
+    expect((await getPublishedArtistForLegacy(artist.legacyId))?.publishedRevision).toMatchObject({ name: "Original", shortBio: artist.shortBio, facebookUrl: artist.facebookUrl, imageAssetId: image.id });
+    expect((await getArtist(admin, artist.id)).auditLogs.map(x => x.action)).toEqual(["EDIT", "PUBLISH", "CREATE"]);
+    await publishArtist(editor, artist.id, { expectedWorkingVersion: 2 });
+    expect((await getPublishedArtistForLegacy(artist.legacyId))?.publishedRevision).toMatchObject({ name: "Renamed Artist", shortBio: artist.shortBio, facebookUrl: artist.facebookUrl, imageAssetId: image.id });
+    const cleared = await updateArtistDraft(editor, artist.id, { name: "Renamed Artist", shortBio: null, facebookUrl: "", expectedWorkingVersion: 2 });
+    expect(cleared).toMatchObject({ shortBio: null, facebookUrl: null, slug: artist.slug, imageAssetId: image.id });
+  });
+
+  it("validates name-only writes and retains duplicate, permission and archive rules", async () => {
+    for (const name of ["", "   ", "x".repeat(161)]) await expect(createArtist(editor, { name })).rejects.toThrow();
+    const first = await createArtist(editor, { name: "  Same Name  " });
+    const second = await createArtist(editor, { name: "Same Name" });
+    expect(first.name).toBe("Same Name");
+    expect(second.slug).toBe("same-name-2");
+    await expect(updateArtistDraft(editor, first.id, { name: " ", expectedWorkingVersion: 1 })).rejects.toThrow();
+    await expect(updateArtistDraft(viewer, first.id, { name: "Denied", expectedWorkingVersion: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await archiveArtist(editor, first.id);
+    await expect(updateArtistDraft(editor, first.id, { name: "Archived", expectedWorkingVersion: 1 })).rejects.toThrow();
+  });
+
   it("keeps post-publication draft edits out of legacy delivery", async () => {
     const artist = await createArtist(editor, { name: "Frozen Name", shortBio: "Published bio" });
     await publishArtist(editor, artist.id, { expectedWorkingVersion: 1 });
