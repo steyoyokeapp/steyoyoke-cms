@@ -1,0 +1,1 @@
+export default function Loading() {return <><section className="page-heading"><h1>Podcast record</h1></section><section className="panel editor-skeleton" aria-busy="true" aria-label="Loading Podcast record"><div/><div/><div/></section></>;}

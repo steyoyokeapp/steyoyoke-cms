@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
+import { SearchPicker } from "./search-picker";
 import { useRouter } from "next/navigation";
 
 export type ReleaseRelationshipOption = { id: string; name: string; legacyId?: number; active?: boolean };
 
 export function ReleaseCreateForm({ artists, labels }: { artists: ReleaseRelationshipOption[]; labels: ReleaseRelationshipOption[] }) {
-  const router = useRouter(); const [pending, setPending] = useState(false); const [error, setError] = useState(""); const [artistQuery, setArtistQuery] = useState("");
-  const shownArtists = useMemo(() => artists.filter((artist) => artist.name.toLowerCase().includes(artistQuery.toLowerCase())), [artists, artistQuery]);
+  const router = useRouter(); const [pending, setPending] = useState(false); const [error, setError] = useState(""); const [primaryArtistId,setPrimaryArtistId]=useState(""); const [secondaryArtistId,setSecondaryArtistId]=useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setError(""); const form = new FormData(event.currentTarget);
     try {
@@ -18,9 +18,9 @@ export function ReleaseCreateForm({ artists, labels }: { artists: ReleaseRelatio
   return <form className="panel editor-form" onSubmit={submit}>
     <div className="eyebrow">Core</div>
     <label>Title<input name="title" required maxLength={255} autoFocus /></label>
-    <label>Search Artists<input value={artistQuery} onChange={(event) => setArtistQuery(event.target.value)} placeholder="Filter picker" /></label>
-    <label>Primary Artist<select name="primaryArtistId" required defaultValue=""><option value="" disabled>Choose published Artist</option>{shownArtists.map((artist) => <option key={artist.id} value={artist.id}>{artist.name} · #{artist.legacyId}</option>)}</select></label>
-    <label>Secondary Artist<select name="secondaryArtistId" defaultValue=""><option value="">None</option>{shownArtists.map((artist) => <option key={artist.id} value={artist.id}>{artist.name} · #{artist.legacyId}</option>)}</select></label>
+
+    <SearchPicker kind="artist" label="Primary Artist" name="primaryArtistId" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} describe={a=>`${a.name} · #${a.legacyId}`} required/>
+    <SearchPicker kind="artist" label="Secondary Artist" name="secondaryArtistId" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} describe={a=>`${a.name} · #${a.legacyId}`} />
     <label>Label<select name="labelId" required defaultValue=""><option value="" disabled>Choose Label</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select></label>
     <label>Release Date<input name="releaseDate" type="date" /></label>
     <div className="eyebrow section-break">Links</div>

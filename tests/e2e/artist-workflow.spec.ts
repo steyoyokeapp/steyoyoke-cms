@@ -1,3 +1,4 @@
+import {mutateAndReload,openPreview} from "./performance-helpers";
 import { expect, test, type Page } from "@playwright/test";
 
 async function signIn(page: Page, email: string, password: string) {
@@ -21,8 +22,8 @@ test("create → publish → isolated edit → unpublish legacy workflow", async
   await page.getByLabel("Artist name").fill(publishedName);
   await page.getByLabel("Short biography").fill("Published biography");
   await page.getByRole("button", { name: "Create draft" }).click();
-  await expect(page).toHaveURL(/\/admin\/artists\/[0-9a-f-]+$/);
-  await expect(page.getByText("Not visible to legacy clients until published.")).toBeVisible();
+  await expect(page).toHaveURL(/\/admin\/artists\/[0-9a-f-]+(?:\?.*)?$/);
+  await openPreview(page); await expect(page.getByTestId("legacy-preview")).toHaveText("null");
 
   const legacyId = await page.locator(".summary-strip .mono").first().textContent();
   expect(legacyId).toMatch(/^\d+$/);
@@ -31,18 +32,17 @@ test("create → publish → isolated edit → unpublish legacy workflow", async
   });
   expect((await response.json()).artists).toEqual([]);
 
-  await page.getByRole("button", { name: "Publish now" }).click();
-  await expect(page.getByTestId("legacy-preview")).toContainText(publishedName);
+  await mutateAndReload(page,"Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(publishedName);
   response = await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, {
     headers: { "X-Csrf-Token": apiKey },
   });
   expect((await response.json()).artists[0].name).toBe(publishedName);
 
   await page.getByLabel("Artist name").fill(draftName);
-  await page.getByRole("button", { name: "Save draft" }).click();
+  await mutateAndReload(page,"Save draft");
   await expect(page.getByRole("heading", { name: draftName })).toBeVisible();
-  await expect(page.getByTestId("legacy-preview")).toContainText(publishedName);
-  await expect(page.getByTestId("legacy-preview")).not.toContainText(draftName);
+  await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(publishedName);
+  await openPreview(page); await expect(page.getByTestId("legacy-preview")).not.toContainText(draftName);
 
   await page.getByRole("button", { name: "Unpublish" }).click();
   await expect(page.locator(".summary-strip")).toContainText("UNPUBLISHED");

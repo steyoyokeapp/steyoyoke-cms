@@ -1,0 +1,1 @@
+export default function Loading() {return <><section className="page-heading"><h1>Release record</h1></section><section className="panel editor-skeleton" aria-busy="true" aria-label="Loading Release record"><div/><div/><div/></section></>;}

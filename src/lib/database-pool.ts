@@ -1,3 +1,4 @@
+import {readMetrics} from "./read-performance";
 import { Pool, type PoolClient } from "pg";
 import { log } from "@/lib/logger";
 
@@ -20,6 +21,12 @@ export class DatabasePool extends Pool {
 
   constructor(connectionString: string) {
     super({ connectionString, ...DATABASE_POOL_LIMITS });
+    this.on("connect", client => {
+      client.query = new Proxy(client.query, {apply(target, self, args) {
+        const metrics=readMetrics.getStore();if(metrics)metrics.queries++;
+        return Reflect.apply(target,self,args);
+      }});
+    });
     this.on("acquire", () => this.report(false));
     this.on("error", () => { this.idleClientErrors += 1; this.report(true); });
   }
@@ -45,6 +52,8 @@ export class DatabasePool extends Pool {
   override connect(): Promise<PoolClient>;
   override connect(callback: ConnectCallback): void;
   override connect(callback?: ConnectCallback): Promise<PoolClient> | void {
+    const metrics=readMetrics.getStore();
+    if(metrics && this.idleCount===0 && this.totalCount>=DATABASE_POOL_LIMITS.max)metrics.poolWaitCount++;
     if (callback) {
       return super.connect((error, client, release) => {
         if (error) this.acquisitionFailed(error);

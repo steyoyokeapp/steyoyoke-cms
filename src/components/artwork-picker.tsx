@@ -1,8 +1,9 @@
 "use client";
 
+import { SearchPicker } from "./search-picker";
 import { useState, type ChangeEvent } from "react";
 
-export type ArtworkOption = { id: string; originalFilename: string | null; compatibilityFilename: string; width: number; height: number; status: string };
+export type ArtworkOption = { id: string; originalFilename: string | null; compatibilityFilename: string | null; width: number | null; height: number | null; status: string };
 
 async function upload(file: File) {
   const data = new FormData(); data.set("file", file); const response = await fetch("/api/admin/media", { method: "POST", body: data }); const body = await response.json();
@@ -36,7 +37,7 @@ export function ArtworkPicker({ value, assets, canWrite, requiredForPublish, onC
   }
   return <section className="panel media-picker"><div className="eyebrow">Media</div><h2>Artwork</h2><p className="muted">{requiredForPublish ? "A READY image is required for Publish and Schedule." : "Artwork is optional; selected media must be READY."}</p>
     {selected && <div className="media-preview"><img src={`/assets/uploads/files/thumbnails/256/${selected.compatibilityFilename}`} alt="Selected artwork preview" /><span><strong>{selected.originalFilename ?? "Imported artwork"}</strong><small>{selected.width}×{selected.height} · {selected.status}</small></span></div>}
-    <label>READY image<select aria-label="Artwork" value={value ?? ""} onChange={(event) => onChange(event.target.value || null)} disabled={!canWrite || pending}><option value="">{requiredForPublish ? "No artwork selected" : "None"}</option>{selected && selected.status !== "READY" && <option value={selected.id} disabled>{selected.originalFilename ?? "Attached media"} · {selected.status} (current)</option>}{options.filter((asset) => asset.status === "READY").map((asset) => <option key={asset.id} value={asset.id}>{asset.originalFilename ?? "Imported artwork"} · {asset.width}×{asset.height}</option>)}</select></label>
+    <SearchPicker kind="IMAGE" label="Artwork" value={value??""} initial={options} disabled={!canWrite||pending} describe={(asset:ArtworkOption)=>`${asset.originalFilename ?? "Attached media"} · ${asset.status} · ${asset.width}×${asset.height}`} onChange={(id,asset)=>{if(asset)setOptions(current=>[asset,...current.filter(x=>x.id!==asset.id)]);onChange(id||null);}} empty="No artwork selected"/>
     {canWrite && <label className="button">{pending ? "Processing…" : "Upload image"}<input hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={onUpload} disabled={pending} /></label>}
     {error && <div className="alert error" role="alert">{error}</div>}
   </section>;

@@ -197,7 +197,7 @@ export async function getPodcast(actor: Actor, id: string) {
   requirePermission(actor, "podcast:read"); const episode = await prisma.podcastEpisode.findUnique({ where: { id }, include: {
     primaryArtist: true, secondaryArtist: true, label: true, chapters: { orderBy: { position: "asc" } },
     artworkAsset: true, audioAsset: true, publishedRevision: { include: { artworkAsset: true, audioAsset: true, chapters: { orderBy: { position: "asc" } } } }, scheduledRevision: { include: { artworkAsset: true, audioAsset: true, chapters: { orderBy: { position: "asc" } } } },
-    revisions: { orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true, audioAsset: true, chapters: { orderBy: { position: "asc" } } } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 40, include: { actor: true } },
+    revisions: { take: 25, orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true, audioAsset: true, chapters: { orderBy: { position: "asc" } } } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 40, include: { actor: true } },
   } }); if (!episode) throw new AppError("Podcast not found.", 404, "PODCAST_NOT_FOUND"); return episode;
 }
 

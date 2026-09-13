@@ -1,0 +1,27 @@
+{"page":"Artists list","sample":0,"queries":1,"serviceMs":185,"sqlMs":111.21804100000008,"bytes":9114}
+{"page":"Artists list","sample":1,"queries":1,"serviceMs":40,"sqlMs":39.02762500000017,"bytes":9114}
+{"page":"Artists list","sample":2,"queries":1,"serviceMs":40,"sqlMs":39.08874999999989,"bytes":9114}
+{"page":"Artist detail","sample":0,"queries":4,"serviceMs":376,"sqlMs":687.1582080000003,"bytes":392}
+{"page":"Artist detail","sample":1,"queries":4,"serviceMs":81,"sqlMs":157.26287599999978,"bytes":392}
+{"page":"Artist detail","sample":2,"queries":4,"serviceMs":76,"sqlMs":152.1126680000002,"bytes":392}
+{"page":"Tracks list","sample":0,"queries":5,"serviceMs":150,"sqlMs":274.58862499999987,"bytes":16148}
+{"page":"Tracks list","sample":1,"queries":5,"serviceMs":121,"sqlMs":242.5855829999996,"bytes":16148}
+{"page":"Tracks list","sample":2,"queries":5,"serviceMs":101,"sqlMs":260.983749,"bytes":16148}
+{"page":"Track detail","sample":0,"queries":8,"serviceMs":174,"sqlMs":457.3619169999997,"bytes":1395}
+{"page":"Track detail","sample":1,"queries":8,"serviceMs":306,"sqlMs":578.5081679999994,"bytes":1395}
+{"page":"Track detail","sample":2,"queries":8,"serviceMs":168,"sqlMs":439.68149799999946,"bytes":1395}
+{"page":"Podcasts list","sample":0,"queries":5,"serviceMs":156,"sqlMs":274.60495800000035,"bytes":18231}
+{"page":"Podcasts list","sample":1,"queries":5,"serviceMs":128,"sqlMs":253.55433399999993,"bytes":18231}
+{"page":"Podcasts list","sample":2,"queries":5,"serviceMs":84,"sqlMs":199.11029099999996,"bytes":18231}
+{"page":"Podcast detail","sample":0,"queries":9,"serviceMs":211,"sqlMs":588.2120829999999,"bytes":3295}
+{"page":"Podcast detail","sample":1,"queries":9,"serviceMs":213,"sqlMs":675.6212500000006,"bytes":3295}
+{"page":"Podcast detail","sample":2,"queries":9,"serviceMs":192,"sqlMs":529.3625410000004,"bytes":3295}
+{"page":"Releases list","sample":0,"queries":5,"serviceMs":147,"sqlMs":266.5974579999993,"bytes":17904}
+{"page":"Releases list","sample":1,"queries":5,"serviceMs":88,"sqlMs":211.74912499999937,"bytes":17904}
+{"page":"Releases list","sample":2,"queries":5,"serviceMs":87,"sqlMs":209.30487600000015,"bytes":17904}
+{"page":"Release detail","sample":0,"queries":14,"serviceMs":276,"sqlMs":737.9596270000002,"bytes":1763}
+{"page":"Release detail","sample":1,"queries":14,"serviceMs":264,"sqlMs":725.0160399999986,"bytes":1763}
+{"page":"Release detail","sample":2,"queries":14,"serviceMs":266,"sqlMs":719.0270379999984,"bytes":1763}
+{"page":"Media","sample":0,"queries":3,"serviceMs":201,"sqlMs":193.14683400000013,"bytes":23247,"stages":[{"ms":50.19062500000018,"category":"counts"},{"ms":97.16654199999994,"category":"counts"},{"ms":45.78966700000001,"category":"relations"}]}
+{"page":"Media","sample":1,"queries":3,"serviceMs":138,"sqlMs":136.6780829999998,"bytes":23247,"stages":[{"ms":37.10450000000037,"category":"counts"},{"ms":62.717125000000124,"category":"counts"},{"ms":36.85645799999929,"category":"relations"}]}
+{"page":"Media","sample":2,"queries":3,"serviceMs":140,"sqlMs":138.4286259999999,"bytes":23247,"stages":[{"ms":37.04658399999971,"category":"counts"},{"ms":62.92241699999977,"category":"counts"},{"ms":38.459625000000415,"category":"relations"}]}

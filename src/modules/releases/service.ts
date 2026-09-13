@@ -230,6 +230,7 @@ const releaseInclude = {
     include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, audioAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
   },
   revisions: {
+    take: 25,
     include: { artworkAsset: true, tracks: { include: { trackRevision: { include: { artworkAsset: true, audioAsset: true, track: { select: { legacyId: true } } } } }, orderBy: { position: "asc" as const } } },
     orderBy: { revisionNumber: "desc" as const },
   },

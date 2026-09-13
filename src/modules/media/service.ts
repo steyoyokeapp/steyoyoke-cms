@@ -1,3 +1,4 @@
+import {measureRead} from "@/lib/read-performance";
 import crypto from "node:crypto";
 import type { AuditAction, MediaKind, Prisma } from "@/generated/prisma/client";
 import { MediaStatus } from "@/generated/prisma/client";
@@ -141,6 +142,7 @@ export async function listMediaOptions(actor: Actor, kind: MediaKind, selectedId
 
 export async function listMediaAssets(actor: Actor, options: Partial<MediaBrowseState> & { limit?: number } = {}, db: Db = prisma) {
   requirePermission(actor, "media:read");
+  return measureRead("media.list",async()=> {
   const { view, kind, page: requestedPage } = parseMediaBrowse(new URLSearchParams({
     view: options.view ?? "ACTIVE", kind: options.kind ?? "ALL", page: String(options.page ?? 1),
   }));
@@ -159,10 +161,7 @@ export async function listMediaAssets(actor: Actor, options: Partial<MediaBrowse
       id: true, kind: true, provider: true, status: true, originalFilename: true, legacyAudioId: true,
       mimeType: true, byteSize: true, width: true, height: true, durationMs: true, compatibilityFilename: true,
       sha256Checksum: true, sourceStorageKey: true, failureReason: true, retiredAt: true, createdAt: true,
-      createdBy: { select: { id: true, name: true } }, processingJob: { select: { status: true } },
-      variants: { where: { variantKey: "LEGACY_THUMB_256" }, select: {
-        variantKey: true, width: true, height: true, byteSize: true, sha256Checksum: true, storageKey: true,
-      } },
+      createdBy: { select: { name: true } },
       // Prisma folds these relation counts into the page query. No reference rows are materialized.
       _count: { select: {
         artistImages: true, artistRevisionImages: true, trackArtwork: true, trackRevisionArtwork: true,
@@ -173,6 +172,7 @@ export async function listMediaAssets(actor: Actor, options: Partial<MediaBrowse
   });
   return { items: assets.map(({ _count, ...asset }) => ({ ...asset, referenceCount: Object.values(_count).reduce((sum, count) => sum + count, 0) })),
     total, page, pageCount, limit, counts };
+  });
 }
 
 async function referenceRows(db: Db, id: string) {

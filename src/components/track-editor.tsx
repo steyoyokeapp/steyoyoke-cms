@@ -1,33 +1,31 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { formatDuration, parseDuration } from "@/modules/tracks/duration";
 import type { TrackOption } from "@/components/track-create-form";
+import { SecondarySections } from "./secondary-sections";
+import { SearchPicker } from "./search-picker";
 import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
 import { AudioPicker, type AudioOption } from "@/components/audio-picker";
 
-type Revision = { id: string; revisionNumber: number; sourceWorkingVersion: number; title: string; primaryArtistName: string; labelName: string; createdAt: string };
-type Audit = { id: string; action: string; createdAt: string; actor: { name: string } | null };
+type Revision = { id:string; revisionNumber:number; sourceWorkingVersion:number };
 export type TrackEditorData = {
   id: string; legacyId: number; title: string; primaryArtistId: string; secondaryArtistId: string | null; labelId: string;
   durationMs: number | null; spotifyUrl: string | null; beatportUrl: string | null; traxsourceUrl: string | null;
   bandcampUrl: string | null; appleMusicUrl: string | null; soundcloudUrl: string | null; artworkAssetId: string | null; audioAssetId: string | null; status: string; workingVersion: number;
-  scheduledFor: string | null; publishedRevision: Revision | null; scheduledRevision: Revision | null; revisions: Revision[]; auditLogs: Audit[];
+  scheduledFor: string | null; publishedRevision: Revision | null; scheduledRevision: Revision | null;
 };
 
 async function result(response: Response) { const body = await response.json(); if (!response.ok) throw new Error(body.error?.message ?? "The operation failed."); return body; }
 const displayDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
 
-export function TrackEditor({ track, role, artists, labels, mediaAssets, audioAssets, legacyPreview }: { track: TrackEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; mediaAssets: ArtworkOption[]; audioAssets: AudioOption[]; legacyPreview: unknown }) {
-  const canWrite = role !== "VIEWER"; const [pending, setPending] = useState(false); const [error, setError] = useState(""); const [artistQuery, setArtistQuery] = useState("");
+export function TrackEditor({ track, role, artists, labels, mediaAssets, audioAssets }: { track: TrackEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; mediaAssets: ArtworkOption[]; audioAssets: AudioOption[] }) {
+  const canWrite = role !== "VIEWER"; const [pending, setPending] = useState(false); const [error, setError] = useState("");
   const [title, setTitle] = useState(track.title); const [primaryArtistId, setPrimaryArtistId] = useState(track.primaryArtistId); const [secondaryArtistId, setSecondaryArtistId] = useState(track.secondaryArtistId ?? ""); const [labelId, setLabelId] = useState(track.labelId); const [duration, setDuration] = useState(formatDuration(track.durationMs) ?? ""); const [scheduledFor, setScheduledFor] = useState("");
   const [links, setLinks] = useState({ spotifyUrl: track.spotifyUrl ?? "", beatportUrl: track.beatportUrl ?? "", traxsourceUrl: track.traxsourceUrl ?? "", bandcampUrl: track.bandcampUrl ?? "", appleMusicUrl: track.appleMusicUrl ?? "", soundcloudUrl: track.soundcloudUrl ?? "" });
   const [artworkAssetId, setArtworkAssetId] = useState<string | null>(track.artworkAssetId);
   const [audioAssetId, setAudioAssetId] = useState<string | null>(track.audioAssetId);
-  const shownArtists = useMemo(() => artists.filter((artist) => artist.name.toLowerCase().includes(artistQuery.toLowerCase()) || artist.id === primaryArtistId || artist.id === secondaryArtistId), [artists, artistQuery, primaryArtistId, secondaryArtistId]);
-  const primary = artists.find(({ id }) => id === primaryArtistId); const secondary = artists.find(({ id }) => id === secondaryArtistId); const label = labels.find(({ id }) => id === labelId);
   const unpublishedChanges = !track.publishedRevision || track.publishedRevision.sourceWorkingVersion !== track.workingVersion;
-  const selectedArtwork = mediaAssets.find(({ id }) => id === artworkAssetId); const selectedAudio = audioAssets.find(({ id }) => id === audioAssetId); const canonicalPreview = { id: track.id, legacyId: track.legacyId, title, artists: { primary: primary ? { id: primary.id, name: primary.name } : null, secondary: secondary ? { id: secondary.id, name: secondary.name } : null }, label: label ? { id: label.id, name: label.name } : null, durationMs: (() => { try { return parseDuration(duration); } catch { return "invalid"; } })(), artwork: selectedArtwork ? { mediaAssetId: selectedArtwork.id, status: selectedArtwork.status, dimensions: `${selectedArtwork.width}×${selectedArtwork.height}`, preview: `/assets/uploads/files/${selectedArtwork.compatibilityFilename}` } : null, audio: selectedAudio ? { mediaAssetId: selectedAudio.id, filename: selectedAudio.originalFilename, durationMs: selectedAudio.durationMs, status: selectedAudio.status, playbackUrl: `/legacy-audio/${selectedAudio.legacyAudioId}-high.mp3` } : null, links: Object.fromEntries(Object.entries(links).map(([key, value]) => [key, value || null])), workflow: { status: track.status, scheduledFor: track.scheduledFor }, workingVersion: track.workingVersion };
 
   async function perform(action: string, extra: Record<string, unknown> = {}) {
     setPending(true); setError("");
@@ -47,9 +45,8 @@ export function TrackEditor({ track, role, artists, labels, mediaAssets, audioAs
       <form className="panel editor-form" onSubmit={save}>
         <div className="eyebrow">Core</div>
         <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} readOnly={!canWrite} required /></label>
-        <label>Search Artists<input value={artistQuery} onChange={(event) => setArtistQuery(event.target.value)} readOnly={!canWrite} placeholder="Filter picker" /></label>
-        <label>Primary Artist<select value={primaryArtistId} onChange={(event) => setPrimaryArtistId(event.target.value)} disabled={!canWrite}>{shownArtists.map((artist) => <option key={artist.id} value={artist.id}>{artist.name} · #{artist.legacyId}</option>)}</select></label>
-        <label>Secondary Artist<select value={secondaryArtistId} onChange={(event) => setSecondaryArtistId(event.target.value)} disabled={!canWrite}><option value="">None</option>{shownArtists.map((artist) => <option key={artist.id} value={artist.id}>{artist.name} · #{artist.legacyId}</option>)}</select></label>
+        <SearchPicker kind="artist" label="Primary Artist" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`} required/>
+        <SearchPicker kind="artist" label="Secondary Artist" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`}/>
         <label>Label<select value={labelId} onChange={(event) => setLabelId(event.target.value)} disabled={!canWrite}>{labels.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active === false ? " (inactive · attached)" : ""}</option>)}</select></label>
         <label>Duration <span className="hint">MM:SS or HH:MM:SS</span><input value={duration} onChange={(event) => setDuration(event.target.value)} readOnly={!canWrite} placeholder="03:45" pattern="(?:[0-9]{2}:)?[0-9]{2}:[0-9]{2}" /></label>
         <div className="eyebrow section-break">Links</div>
@@ -67,8 +64,6 @@ export function TrackEditor({ track, role, artists, labels, mediaAssets, audioAs
         {track.status === "ARCHIVED" ? <button className="button" disabled={pending} onClick={() => perform("restore")}>Restore</button> : <button className="button danger" disabled={pending} onClick={() => perform("archive")}>Archive</button>}
       </div>{track.scheduledFor && <p className="schedule-note">Scheduled for {displayDate(track.scheduledFor)} UTC.</p>}</section>}
     </div>
-    <aside className="preview-column"><section className="panel preview"><div className="eyebrow">Canonical preview</div><h2>{title || "Untitled Track"}</h2><pre data-testid="canonical-preview">{JSON.stringify(canonicalPreview, null, 2)}</pre></section><section className="panel preview"><div className="eyebrow">Legacy preview</div><h2>Compatibility JSON</h2>{legacyPreview ? <pre data-testid="legacy-preview">{JSON.stringify(legacyPreview, null, 2)}</pre> : <p className="empty-inline">Not visible to legacy clients until published.</p>}</section></aside>
-    <section className="panel history-panel"><h2>Revision history</h2>{track.revisions.length ? track.revisions.map((revision) => <div className="history-row" key={revision.id}><strong>r{revision.revisionNumber}</strong><span>{revision.title}</span><span>from v{revision.sourceWorkingVersion}</span><time>{displayDate(revision.createdAt)} UTC</time></div>) : <p className="muted">No frozen revisions yet.</p>}</section>
-    <section className="panel history-panel"><h2>Audit trail</h2>{track.auditLogs.map((log) => <div className="history-row" key={log.id}><strong>{log.action}</strong><span>{log.actor?.name ?? "Scheduler"}</span><time>{displayDate(log.createdAt)} UTC</time></div>)}</section>
+    <SecondarySections kind="tracks" id={track.id} version={track.workingVersion} />
   </div>;
 }

@@ -1,3 +1,4 @@
+import {mutateAndReload,openPreview,choose} from "./performance-helpers";
 import { expect, test, type Page } from "@playwright/test";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
@@ -20,10 +21,10 @@ test("Editor uploads local images and Artist delivery follows frozen artwork rev
   continueUpload(); await upload; await expect(optimistic).toHaveCount(0); await page.unroute("**/api/admin/media");
   await expect(page.getByText(firstName, { exact: true })).toBeVisible(); await expect(page.locator(".media-card").first()).toContainText("READY"); await expect.poll(() => page.evaluate(() => (window as unknown as { __mediaObjectUrls: { revoked: string[] } }).__mediaObjectUrls.revoked.length)).toBe(1); await expect(page.locator(".preview")).toContainText("ORIGINAL"); await expect(page.locator(".preview")).toContainText("LEGACY_THUMB_80");
   const { items: assets } = await (await page.request.get("/api/admin/media")).json(); const first = assets.find((asset: { originalFilename: string }) => asset.originalFilename === firstName); expect(first).toBeTruthy();
-  await page.getByRole("link", { name: "Artists", exact: true }).click(); await page.getByRole("link", { name: "New artist" }).click(); await page.getByLabel("Artist name").fill(artistName); await page.getByRole("button", { name: "Create draft" }).click(); await page.getByLabel("Artwork").selectOption(first.id); await page.getByRole("button", { name: "Save draft" }).click(); const legacyId = await page.locator(".summary-strip .mono").first().textContent(); await page.getByRole("button", { name: "Publish now" }).click(); await expect(page.getByTestId("legacy-preview")).toContainText(first.compatibilityFilename);
+  await page.getByRole("link", { name: "Artists", exact: true }).click(); await page.getByRole("link", { name: "New artist" }).click(); await page.getByLabel("Artist name").fill(artistName); await page.getByRole("button", { name: "Create draft" }).click(); await choose(page,"Artwork",first.id); await mutateAndReload(page,"Save draft"); const legacyId = await page.locator(".summary-strip .mono").first().textContent(); await mutateAndReload(page,"Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(first.compatibilityFilename);
   let legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(first.compatibilityFilename); expect((await page.request.get(legacy.image)).ok()).toBe(true);
-  await page.locator('.media-picker input[type="file"]').setInputFiles({ name: secondName, mimeType: "image/png", buffer: png }); await expect(page.getByText(secondName, { exact: true })).toBeVisible(); const second = (await (await page.request.get("/api/admin/media")).json()).items.find((asset: { originalFilename: string }) => asset.originalFilename === secondName); expect(second).toBeTruthy(); await page.getByRole("button", { name: "Save draft" }).click();
-  legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(first.compatibilityFilename); await page.getByRole("button", { name: "Publish now" }).click(); await expect(page.getByTestId("legacy-preview")).toContainText(second.compatibilityFilename); legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(second.compatibilityFilename); expect(errors).toEqual([]);
+  await page.locator('.media-picker input[type="file"]').setInputFiles({ name: secondName, mimeType: "image/png", buffer: png }); await expect(page.getByText(secondName, { exact: true })).toBeVisible(); const second = (await (await page.request.get("/api/admin/media")).json()).items.find((asset: { originalFilename: string }) => asset.originalFilename === secondName); expect(second).toBeTruthy(); await mutateAndReload(page,"Save draft");
+  legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(first.compatibilityFilename); await mutateAndReload(page,"Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(second.compatibilityFilename); legacy = (await (await page.request.get(`/index.php/cms/api/${legacyId}?filter=artists`, { headers: { "X-Csrf-Token": apiKey } })).json()).artists[0]; expect(legacy.image).toContain(second.compatibilityFilename); expect(errors).toEqual([]);
 });
 
 test("Optimistic failure is removed and its local preview URL is revoked", async ({ page }) => {
@@ -34,9 +35,10 @@ test("Optimistic failure is removed and its local preview URL is revoked", async
     URL.createObjectURL = (blob) => { const url = create(blob); state.created.push(url); return url; };
     URL.revokeObjectURL = (url) => { state.revoked.push(url); revoke(url); };
   });
-  await page.route("**/api/admin/media", async (route) => { if (route.request().method() !== "POST") return route.continue(); await new Promise((resolve) => setTimeout(resolve, 250)); await route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: { message: "Image upload failed cleanly." } }) }); });
+  let releaseFailure!:()=>void;const failureGate=new Promise<void>(resolve=>{releaseFailure=resolve;});
+  await page.route("**/api/admin/media", async (route) => { if (route.request().method() !== "POST") return route.continue(); await failureGate; await route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: { message: "Image upload failed cleanly." } }) }); });
   const upload = page.getByText("Upload image", { exact: true }).locator("input").setInputFiles({ name, mimeType: "image/png", buffer: png });
-  const optimistic = page.locator('[data-optimistic="true"]').filter({ hasText: name }); await expect(optimistic).toContainText("UPLOADING"); await upload; await expect(optimistic).toHaveCount(0); await page.unroute("**/api/admin/media"); await expect(page.locator(".alert.error")).toContainText("Image upload failed cleanly.");
+  const optimistic = page.locator('[data-optimistic="true"]').filter({ hasText: name }); await expect(optimistic).toContainText("UPLOADING"); releaseFailure(); await upload; await expect(optimistic).toHaveCount(0); await page.unroute("**/api/admin/media"); await expect(page.locator(".alert.error")).toContainText("Image upload failed cleanly.");
   expect(await page.evaluate(() => (window as unknown as { __mediaObjectUrls: { created: string[]; revoked: string[] } }).__mediaObjectUrls)).toMatchObject({ created: expect.any(Array), revoked: expect.any(Array) });
   expect(await page.evaluate(() => { const value = (window as unknown as { __mediaObjectUrls: { created: string[]; revoked: string[] } }).__mediaObjectUrls; return [value.created.length, value.revoked.length]; })).toEqual([1, 1]);
 });
@@ -74,12 +76,16 @@ test("Media pagination and lazy details discard stale selections and retain brow
     const items = retired ? [] : requestedPage === 2 ? [row(b, "Page two")] : [row(a, "Asset A"), row(b, "Asset B")];
     await route.fulfill({ json: { items, total: retired ? 0 : 51, page: requestedPage, limit: 50, pageCount: retired ? 1 : 2, counts: { active: 51, retired: 0 } } });
   });
-  await page.route(/\/api\/admin\/media\/[0-9a-f-]+$/, async route => {
+  await page.route(/\/api\/admin\/media\/[0-9a-f-]+(?:\?.*)?$/, async route => {
     const id = route.request().url().split("/").at(-1)!; detailRequests.push(id);
     if (id === a) await gateA;
     await route.fulfill({ json: { ...row(id, id === a ? "Asset A" : "Asset B"), references: [{ type: "TRACK_WORKING", id, title: id === a ? "STALE A REFERENCE" : "Selected B reference" }] } });
   });
   await page.goto("/admin/media");
+  // Initial page is streamed from the server; exercise the mocked client refresh on a filter transition.
+  await page.getByRole("tab",{name:/Retired/}).click();
+  await expect(page.getByRole("status")).toContainText("0 results");
+  await page.getByRole("tab",{name:/Active/}).click();
   await expect(page.getByRole("status")).toContainText("51 results");
   expect(detailRequests).toEqual([]); await expect(page.locator(".media-detail")).toHaveCount(0);
   await page.locator(".media-card").filter({ hasText: "Asset A" }).click();

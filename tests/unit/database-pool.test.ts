@@ -41,3 +41,11 @@ describe("database pool configuration and diagnostics", () => {
     await pool.end();
   });
 });
+
+it("counts numeric SQL dispatches in their own read scope without retaining SQL", async()=>{
+ const {readMetrics}=await import("@/lib/read-performance");const pool=new DatabasePool("postgresql://localhost/test");
+ const query=vi.fn().mockResolvedValue({rows:[]});const client={query} as unknown as PoolClient;pool.emit("connect",client);
+ const one={queries:0,poolWaitCount:0},two={queries:0,poolWaitCount:0};
+ await Promise.all([readMetrics.run(one,async()=>{await client.query("SELECT 1");await client.query("SELECT 2");}),readMetrics.run(two,async()=>{await client.query("SELECT 3");})]);
+ expect(one.queries).toBe(2);expect(two.queries).toBe(1);expect(Object.keys(one)).toEqual(["queries","poolWaitCount"]);await pool.end();
+});

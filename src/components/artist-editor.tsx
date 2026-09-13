@@ -2,18 +2,15 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { SecondarySections } from "./secondary-sections";
 import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
 
-type Revision = {
-  id: string; revisionNumber: number; sourceWorkingVersion: number; name: string; slug: string;
-  shortBio: string | null; facebookUrl: string | null; imageAsset: { compatibilityFilename: string } | null; createdAt: string;
-};
-type Audit = { id: string; action: string; createdAt: string; actor: { name: string } | null };
+type Revision = { id:string; revisionNumber:number; sourceWorkingVersion:number };
 export type ArtistEditorData = {
   id: string; legacyId: number; name: string; slug: string; shortBio: string | null;
-  facebookUrl: string | null; imageAssetId: string | null; status: string; workingVersion: number; scheduledFor: string | null;
+  facebookUrl: string | null; imageAssetId: string | null; status: string; workingVersion: number; revisionCount:number; scheduledFor: string | null;
   publishedRevision: Revision | null; scheduledRevision: Revision | null;
-  revisions: Revision[]; auditLogs: Audit[];
+
 };
 
 async function readResult(response: Response) {
@@ -36,24 +33,6 @@ export function ArtistEditor({ artist, role, mediaAssets }: { artist: ArtistEdit
   const [facebookUrl, setFacebookUrl] = useState(artist.facebookUrl ?? "");
   const [imageAssetId, setImageAssetId] = useState<string | null>(artist.imageAssetId);
   const [scheduledFor, setScheduledFor] = useState("");
-
-  const selectedArtwork = mediaAssets.find(({ id }) => id === imageAssetId);
-  const canonicalPreview = {
-    id: artist.id, legacyId: artist.legacyId, name, slug,
-    shortBio: shortBio || null, facebookUrl: facebookUrl || null,
-    status: artist.status, workingVersion: artist.workingVersion,
-    artwork: selectedArtwork ? { mediaAssetId: selectedArtwork.id, status: selectedArtwork.status, dimensions: `${selectedArtwork.width}×${selectedArtwork.height}`, preview: `/assets/uploads/files/${selectedArtwork.compatibilityFilename}` } : null,
-  };
-  const isLegacyVisible = artist.publishedRevision && ["PUBLISHED", "SCHEDULED"].includes(artist.status);
-  const legacyPreview = isLegacyVisible && artist.publishedRevision ? {
-    artists: [{
-      id: String(artist.legacyId), name: artist.publishedRevision.name, image: artist.publishedRevision.imageAsset ? `/assets/uploads/files/1440/${artist.publishedRevision.imageAsset.compatibilityFilename}` : null,
-      facebook_url: artist.publishedRevision.facebookUrl,
-      description_short: artist.publishedRevision.shortBio, priority: null,
-    }],
-    base_cover_folder: "/1440/",
-    main_cover_folder: "/assets/uploads/files",
-  } : null;
 
   async function perform(action: string, extra: Record<string, unknown> = {}) {
     setPending(true); setError(""); setMessage("");
@@ -116,17 +95,12 @@ export function ArtistEditor({ artist, role, mediaAssets }: { artist: ArtistEdit
             {artist.status !== "ARCHIVED" && artist.status !== "SCHEDULED" && <><input aria-label="Schedule time" type="datetime-local" value={scheduledFor} onInput={(event) => setScheduledFor(event.currentTarget.value)} /><button className="button" disabled={pending || !scheduledFor} onClick={() => perform("schedule", { scheduledFor: new Date(scheduledFor).toISOString(), expectedWorkingVersion: artist.workingVersion })}>Schedule</button></>}
             {artist.status === "SCHEDULED" && <button className="button" disabled={pending} onClick={() => perform("cancelSchedule")}>Cancel schedule</button>}
             {artist.status === "ARCHIVED" ? <button className="button" disabled={pending} onClick={() => perform("restore")}>Restore</button> : <button className="button danger" disabled={pending} onClick={() => perform("archive")}>Archive</button>}
-            {isAdmin && artist.status === "DRAFT" && artist.revisions.length === 0 && <button className="button danger" disabled={pending} onClick={() => confirm("Permanently delete this never-published draft?") && perform("hardDelete")}>Delete permanently</button>}
+            {isAdmin && artist.status === "DRAFT" && artist.revisionCount === 0 && <button className="button danger" disabled={pending} onClick={() => confirm("Permanently delete this never-published draft?") && perform("hardDelete")}>Delete permanently</button>}
           </div>
           {artist.scheduledFor && <p className="schedule-note">Scheduled for {displayDate(artist.scheduledFor)} UTC.</p>}
         </section>}
       </div>
-      <aside className="preview-column">
-        <section className="panel preview"><div className="eyebrow">Canonical preview</div><h2>{name || "Untitled artist"}</h2><p>{shortBio || "No biography yet."}</p><dl><dt>Slug</dt><dd>/{slug}</dd><dt>Facebook</dt><dd>{facebookUrl || "—"}</dd></dl><pre>{JSON.stringify(canonicalPreview, null, 2)}</pre></section>
-        <section className="panel preview"><div className="eyebrow">Legacy preview</div><h2>Compatibility JSON</h2>{legacyPreview ? <pre data-testid="legacy-preview">{JSON.stringify(legacyPreview, null, 2)}</pre> : <p className="empty-inline">Not visible to legacy clients until published.</p>}</section>
-      </aside>
-      <section className="panel history-panel"><h2>Revision history</h2>{artist.revisions.length === 0 ? <p className="muted">No frozen revisions yet.</p> : artist.revisions.map((revision) => <div className="history-row" key={revision.id}><strong>r{revision.revisionNumber}</strong><span>{revision.name}</span><span>from v{revision.sourceWorkingVersion}</span><time>{displayDate(revision.createdAt)} UTC</time></div>)}</section>
-      <section className="panel history-panel"><h2>Audit trail</h2>{artist.auditLogs.map((log) => <div className="history-row" key={log.id}><strong>{log.action}</strong><span>{log.actor?.name ?? "Scheduler"}</span><time>{displayDate(log.createdAt)} UTC</time></div>)}</section>
+      <SecondarySections kind="artists" id={artist.id} version={artist.workingVersion} />
     </div>
   );
 }

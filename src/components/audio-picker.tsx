@@ -1,5 +1,6 @@
 "use client";
 
+import { SearchPicker } from "./search-picker";
 import { useState, type ChangeEvent } from "react";
 import { formatAudioDuration } from "@/modules/media/format";
 
@@ -11,8 +12,8 @@ export function AudioPicker({ value, assets, canWrite, requiredForPublish, onCha
   const [options, setOptions] = useState(assets); const [pending, setPending] = useState(false); const [error, setError] = useState(""); const selected = options.find((asset) => asset.id === value);
   async function onUpload(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (!file) return; setPending(true); setError(""); try { const asset = await uploadAudio(file); setOptions([asset, ...options]); onChange(asset.id); } catch (caught) { setError(caught instanceof Error ? caught.message : "Upload failed."); } finally { setPending(false); event.target.value = ""; } }
   return <section className="panel media-picker"><div className="eyebrow">Media</div><h2>Audio</h2><p className="muted">{requiredForPublish ? "A READY MP3 is required for Publish and Schedule." : "Audio is optional; selected media must be a READY MP3."}</p>
-    {selected && <div className="audio-preview"><span><strong>{selected.originalFilename ?? selected.legacyAudioId ?? "External audio"}</strong><small>{formatAudioDuration(selected.durationMs)} · {selected.status}</small></span>{selected.status === "READY" && selected.legacyAudioId && <audio controls preload="metadata" src={`/legacy-audio/${selected.legacyAudioId}-high.mp3`} />}</div>}
-    <label>READY audio<select aria-label="Audio" value={value ?? ""} onChange={(event) => onChange(event.target.value || null)} disabled={!canWrite || pending}><option value="">{requiredForPublish ? "No audio selected" : "None"}</option>{selected && selected.status !== "READY" && <option value={selected.id} disabled>{selected.originalFilename ?? "Attached media"} · {selected.status} (current)</option>}{options.filter((asset) => asset.status === "READY").map((asset) => <option key={asset.id} value={asset.id}>{asset.originalFilename ?? asset.legacyAudioId ?? "Audio"} · {formatAudioDuration(asset.durationMs)}</option>)}</select></label>
+    {selected && <div className="audio-preview"><span><strong>{selected.originalFilename ?? selected.legacyAudioId ?? "External audio"}</strong><small>{formatAudioDuration(selected.durationMs)} · {selected.status}</small></span>{selected.status === "READY" && selected.legacyAudioId && <audio controls preload="none" src={`/legacy-audio/${selected.legacyAudioId}-high.mp3`} />}</div>}
+    <SearchPicker kind="AUDIO" label="Audio" value={value??""} initial={options} disabled={!canWrite||pending} describe={(asset:AudioOption)=>`${asset.originalFilename ?? asset.legacyAudioId ?? "Attached media"} · ${asset.status}`} onChange={(id,asset)=>{if(asset)setOptions(current=>[asset,...current.filter(x=>x.id!==asset.id)]);onChange(id||null);}} empty="No audio selected"/>
     {canWrite && <label className="button">{pending ? "Processing…" : "Upload MP3"}<input hidden type="file" accept="audio/mpeg,.mp3" onChange={onUpload} disabled={pending} /></label>}
     {error && <div className="alert error" role="alert">{error}</div>}
   </section>;

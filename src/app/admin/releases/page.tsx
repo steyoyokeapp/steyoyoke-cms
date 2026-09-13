@@ -1,14 +1,2 @@
-import Link from "next/link";
-import { headers } from "next/headers";
-import { actorForPage } from "@/lib/session";
-import { formatCmsDate } from "@/lib/date";
-import { getReleaseFormOptions, listReleases } from "@/modules/releases/service";
-
-export default async function ReleasesPage({ searchParams }: PageProps<"/admin/releases">) {
-  const actor = await actorForPage(await headers()); const params = await searchParams;
-  const filters = { q: typeof params.q === "string" ? params.q : undefined, artistId: typeof params.artistId === "string" ? params.artistId : undefined, labelId: typeof params.labelId === "string" ? params.labelId : undefined, status: typeof params.status === "string" ? params.status : undefined };
-  const [releases, options] = await Promise.all([listReleases(actor, filters), getReleaseFormOptions(actor)]);
-  return <><section className="page-heading"><div><div className="eyebrow">Catalogue</div><h1>Releases</h1><p className="muted">Ordered Track memberships with immutable delivery revisions.</p></div>{actor.role !== "VIEWER" && <Link className="button primary" href="/admin/releases/new">Create Release</Link>}</section>
-    <form className="panel filter-bar"><input name="q" defaultValue={filters.q} placeholder="Search title" /><select name="artistId" defaultValue={filters.artistId ?? ""}><option value="">All Artists</option>{options.artists.map((artist) => <option value={artist.id} key={artist.id}>{artist.name}</option>)}</select><select name="labelId" defaultValue={filters.labelId ?? ""}><option value="">All Labels</option>{options.labels.map((label) => <option value={label.id} key={label.id}>{label.name}</option>)}</select><select name="status" defaultValue={filters.status ?? ""}><option value="">All statuses</option>{["DRAFT","SCHEDULED","PUBLISHED","UNPUBLISHED","ARCHIVED"].map((status) => <option key={status}>{status}</option>)}</select><button className="button">Filter</button></form>
-    <section className="panel table-panel release-table"><div className="table-row table-head"><span>Release</span><span>Primary Artist</span><span>Release Date</span><span>Label</span><span>Tracks</span><span>Legacy ID</span><span>Status</span><span>Unpublished Changes</span><span>Updated</span></div>{releases.length === 0 && <div className="empty">No Releases match these filters.</div>}{releases.map((release) => { const changed = !release.publishedRevision || release.publishedRevision.sourceWorkingVersion !== release.workingVersion; return <Link className="table-row" href={`/admin/releases/${release.id}`} key={release.id}><span><strong>{release.title}</strong></span><span>{release.primaryArtist.name}</span><span>{release.releaseDate ? new Intl.DateTimeFormat("en-CA", { timeZone: "UTC" }).format(release.releaseDate) : "—"}</span><span>{release.label.name}</span><span className="mono">{release.tracks.length}</span><span className="mono">{release.legacyId}</span><span><i className={`status ${release.status.toLowerCase()}`}>{release.status}</i></span><span>{changed ? "Yes" : "No"}</span><span>{formatCmsDate(release.updatedAt)}</span></Link>; })}</section></>;
-}
+import {CatalogueList} from "@/components/catalogue-list";
+export default async function Page({searchParams}:PageProps<"/admin/releases">) {return <CatalogueList kind="releases" params={await searchParams}/>;}

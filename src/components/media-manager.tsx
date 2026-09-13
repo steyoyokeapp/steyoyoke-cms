@@ -25,14 +25,15 @@ const previewUrl = (asset: MediaRow, thumbnail = false) => asset.status === "REA
 
 type MediaPage = { items: MediaRow[]; total: number; page: number; pageCount: number; limit: number; counts: { active: number; retired: number } };
 
-export function MediaManager({ role, initialBrowse }: { role: string; initialBrowse: MediaBrowseState }) {
+export function MediaManager({ role, initialBrowse, initialPage }: { role: string; initialBrowse: MediaBrowseState; initialPage?:MediaPage }) {
   const [browse, setBrowse] = useState(initialBrowse);
   const { view, kind: filter, page } = browse;
   const browseKey = mediaBrowseQuery(browse).toString();
   const browseKeyRef = useRef(browseKey);
-  const [listing, setListing] = useState<{ key: string; data: MediaPage } | null>(null);
+  const [listing, setListing] = useState<{ key: string; data: MediaPage } | null>(()=>initialPage?{key:mediaBrowseQuery(initialBrowse).toString(),data:{...initialPage,items:initialPage.items.map(normalize)}}:null);
   const [refreshVersion, setRefreshVersion] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialPage);
+  const initialKey=useRef(initialPage?browseKey:null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ key: string; asset: MediaRow } | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -97,9 +98,9 @@ export function MediaManager({ role, initialBrowse }: { role: string; initialBro
         timer = setTimeout(refresh, 5_000);
       }
     };
-    void refresh();
+    if(!(initialKey.current===browseKey && refreshVersion===0 && initialPage && !initialPage.items.some(asset=>asset.status==="PROCESSING"))) {initialKey.current=null;void refresh();}
     return () => { active = false; controller.abort(); clearTimeout(timer); };
-  }, [browseKey, refreshVersion]);
+  }, [browseKey, refreshVersion, initialPage]);
 
   useEffect(() => {
     if (!visibleSelectedId) return;
@@ -222,7 +223,7 @@ export function MediaManager({ role, initialBrowse }: { role: string; initialBro
       </div>
       {!visibleOptimistic.length && !visibleAssets.length ? !currentPage ? null : <div className="empty media-empty"><strong>{view === "RETIRED" ? "No retired media assets." : "No active media assets yet."}</strong><span>{view === "RETIRED" ? "Retired assets remain available here until permanently deleted." : "Upload an image or MP3 to create the first asset."}</span></div> : <div className="media-grid">
         {visibleOptimistic.map((item) => <div className="media-card optimistic" data-optimistic="true" aria-disabled="true" key={item.id}>{/* eslint-disable-next-line @next/next/no-img-element -- Blob URLs are temporary local previews and cannot use the Next image optimizer. */}<img src={item.previewUrl} alt=""/><strong>{item.originalFilename}</strong><small>{(item.byteSize / 1024).toFixed(1)} KB · Local preview</small><i className="status uploading">UPLOADING</i><small>Sending source…</small></div>)}
-        {visibleAssets.map((asset) => <button type="button" className={`media-card${selected?.id === asset.id ? " selected" : ""}`} aria-pressed={selected?.id === asset.id} key={asset.id} disabled={pendingAction} onClick={() => { setSelectedId(asset.id); setDetailError(""); setConfirmDelete(false); }}>{asset.kind === "IMAGE" && previewUrl(asset, true) ? <img src={previewUrl(asset, true)!} alt="" /> : <span className="audio-tile" aria-hidden="true">{asset.kind === "AUDIO" ? "♫" : "◇"}</span>}<strong>{asset.originalFilename ?? asset.legacyAudioId ?? "External audio"}</strong><small>{asset.kind === "IMAGE" ? `${asset.width}×${asset.height}` : formatAudioDuration(asset.durationMs)} · {asset.byteSize === null ? "external" : `${(asset.byteSize / 1024).toFixed(1)} KB`}</small><i className={`status ${asset.status.toLowerCase()}`}>{asset.status}</i><small>{asset.status === "PROCESSING" ? "Creating representations…" : `${asset.referenceCount} references`} · {formatCmsDate(asset.retiredAt ?? asset.createdAt)} · {asset.createdBy.name}</small></button>)}
+        {visibleAssets.map((asset) => <button type="button" className={`media-card${selected?.id === asset.id ? " selected" : ""}`} aria-pressed={selected?.id === asset.id} key={asset.id} disabled={pendingAction} onClick={() => { setSelectedId(asset.id); setDetailError(""); setConfirmDelete(false); }}>{asset.kind === "IMAGE" && previewUrl(asset, true) ? <img src={previewUrl(asset, true)!} alt="" loading="lazy" decoding="async" width={256} height={256} /> : <span className="audio-tile" aria-hidden="true">{asset.kind === "AUDIO" ? "♫" : "◇"}</span>}<strong>{asset.originalFilename ?? asset.legacyAudioId ?? "External audio"}</strong><small>{asset.kind === "IMAGE" ? `${asset.width}×${asset.height}` : formatAudioDuration(asset.durationMs)} · {asset.byteSize === null ? "external" : `${(asset.byteSize / 1024).toFixed(1)} KB`}</small><i className={`status ${asset.status.toLowerCase()}`}>{asset.status}</i><small>{asset.status === "PROCESSING" ? "Creating representations…" : `${asset.referenceCount} references`} · {formatCmsDate(asset.retiredAt ?? asset.createdAt)} · {asset.createdBy.name}</small></button>)}
       </div>}
     </section>
     {selected && <section className="panel preview media-detail">

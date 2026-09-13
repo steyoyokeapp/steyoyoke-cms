@@ -1,15 +1,2 @@
-import Link from "next/link";
-import { headers } from "next/headers";
-import { actorForPage } from "@/lib/session";
-import { formatCmsDate } from "@/lib/date";
-import { formatDuration } from "@/modules/tracks/duration";
-import { getTrackFormOptions, listTracks } from "@/modules/tracks/service";
-
-export default async function TracksPage({ searchParams }: PageProps<"/admin/tracks">) {
-  const actor = await actorForPage(await headers()); const params = await searchParams;
-  const filters = { q: typeof params.q === "string" ? params.q : undefined, artistId: typeof params.artistId === "string" ? params.artistId : undefined, labelId: typeof params.labelId === "string" ? params.labelId : undefined, status: typeof params.status === "string" ? params.status : undefined };
-  const [tracks, options] = await Promise.all([listTracks(actor, filters), getTrackFormOptions(actor)]);
-  return <><section className="page-heading"><div><div className="eyebrow">Content</div><h1>Tracks</h1><p className="muted">Working drafts and frozen delivery revisions.</p></div>{actor.role !== "VIEWER" && <Link className="button primary" href="/admin/tracks/new">Create Track</Link>}</section>
-    <form className="panel filter-bar"><input name="q" defaultValue={filters.q} placeholder="Search title" /><select name="artistId" defaultValue={filters.artistId ?? ""}><option value="">All Artists</option>{options.artists.map((artist) => <option value={artist.id} key={artist.id}>{artist.name}</option>)}</select><select name="labelId" defaultValue={filters.labelId ?? ""}><option value="">All Labels</option>{options.labels.map((label) => <option value={label.id} key={label.id}>{label.name}</option>)}</select><select name="status" defaultValue={filters.status ?? ""}><option value="">All statuses</option>{["DRAFT","SCHEDULED","PUBLISHED","UNPUBLISHED","ARCHIVED"].map((status) => <option key={status}>{status}</option>)}</select><button className="button">Filter</button></form>
-    <section className="panel table-panel track-table"><div className="table-row table-head"><span>Track</span><span>Primary Artist</span><span>Label</span><span>Legacy ID</span><span>Duration</span><span>Status</span><span>Unpublished changes</span><span>Updated</span></div>{tracks.length === 0 && <div className="empty">No Tracks match these filters.</div>}{tracks.map((track) => { const changed = !track.publishedRevision || track.publishedRevision.sourceWorkingVersion !== track.workingVersion; return <Link className="table-row" href={`/admin/tracks/${track.id}`} key={track.id}><span><strong>{track.title}</strong></span><span>{track.primaryArtist.name}</span><span>{track.label.name}</span><span className="mono">{track.legacyId}</span><span className="mono">{formatDuration(track.durationMs) ?? "—"}</span><span><i className={`status ${track.status.toLowerCase()}`}>{track.status}</i></span><span>{changed ? "Yes" : "No"}</span><span>{formatCmsDate(track.updatedAt)}</span></Link>; })}</section></>;
-}
+import {CatalogueList} from "@/components/catalogue-list";
+export default async function Page({searchParams}:PageProps<"/admin/tracks">) {return <CatalogueList kind="tracks" params={await searchParams}/>;}

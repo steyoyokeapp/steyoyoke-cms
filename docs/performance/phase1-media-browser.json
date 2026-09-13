@@ -1,0 +1,93 @@
+{
+  "environment": "Local production compilation; local database/storage; 50 cards",
+  "measurement": "Media DOM observer; navigation assertion timings include Playwright polling",
+  "media": {
+    "start": 5137.4000000059605,
+    "shellMs": 29.5,
+    "cardsMs": 329.90000000596046,
+    "resources": [
+      {
+        "kind": "fetch",
+        "ms": 34.099999994039536,
+        "ttfb": 4,
+        "path": "/admin/media"
+      },
+      {
+        "kind": "script",
+        "ms": 3.800000011920929,
+        "ttfb": 3.5,
+        "path": "/_next/static/chunks/24wjv6fnhp-ba.js"
+      },
+      {
+        "kind": "other",
+        "ms": 2.0999999940395355,
+        "ttfb": 1.7999999821186066,
+        "path": "/favicon.ico"
+      },
+      {
+        "kind": "img",
+        "ms": 11.300000011920929,
+        "ttfb": 11.100000023841858,
+        "path": "/assets/uploads/files/thumbnails/256/dd122a43-a8b2-4a4a-92b0-f7f1f90de2b9.png"
+      },
+      {
+        "kind": "img",
+        "ms": 12.099999994039536,
+        "ttfb": 12,
+        "path": "/assets/uploads/files/thumbnails/256/d5df5a79-0bc1-4d86-994c-847c51bde046.png"
+      },
+      {
+        "kind": "img",
+        "ms": 13,
+        "ttfb": 12.799999982118607,
+        "path": "/assets/uploads/files/thumbnails/256/1b0c3837-c85f-487a-a120-b44ffda3043c.png"
+      },
+      {
+        "kind": "img",
+        "ms": 17.19999998807907,
+        "ttfb": 16.899999976158142,
+        "path": "/assets/uploads/files/thumbnails/256/c9cd37db-624b-4ab5-b684-b480537815eb.png"
+      }
+    ],
+    "images": 16,
+    "cards": 50
+  },
+  "navigationAssertionMs": [
+    {
+      "page": "Artists",
+      "ms": 41
+    },
+    {
+      "page": "Artists detail",
+      "ms": 70
+    },
+    {
+      "page": "Tracks",
+      "ms": 868
+    },
+    {
+      "page": "Tracks detail",
+      "ms": 822
+    },
+    {
+      "page": "Podcasts",
+      "ms": 348
+    },
+    {
+      "page": "Podcasts detail",
+      "ms": 821
+    },
+    {
+      "page": "Releases",
+      "ms": 336
+    },
+    {
+      "page": "Releases detail",
+      "ms": 822
+    },
+    {
+      "page": "Media populated",
+      "ms": 813
+    }
+  ]
+}

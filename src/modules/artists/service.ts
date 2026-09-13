@@ -381,7 +381,7 @@ export async function getArtist(actor: Actor, id: string) {
       imageAsset: true,
       publishedRevision: { include: { imageAsset: true } },
       scheduledRevision: { include: { imageAsset: true } },
-      revisions: { orderBy: { revisionNumber: "desc" }, include: { imageAsset: true } },
+      revisions: { take: 25, orderBy: { revisionNumber: "desc" }, include: { imageAsset: true } },
       auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } },
     },
   });

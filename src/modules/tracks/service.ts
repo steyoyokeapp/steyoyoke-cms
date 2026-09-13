@@ -226,7 +226,7 @@ export async function restoreTrack(actor: Actor, id: string) {
 
 export async function getTrack(actor: Actor, id: string) {
   requirePermission(actor, "track:read");
-  const track = await prisma.track.findUnique({ where: { id }, include: { primaryArtist: true, secondaryArtist: true, label: true, artworkAsset: true, audioAsset: true, publishedRevision: { include: { artworkAsset: true, audioAsset: true } }, scheduledRevision: { include: { artworkAsset: true, audioAsset: true } }, revisions: { orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true, audioAsset: true } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } } } });
+  const track = await prisma.track.findUnique({ where: { id }, include: { primaryArtist: true, secondaryArtist: true, label: true, artworkAsset: true, audioAsset: true, publishedRevision: { include: { artworkAsset: true, audioAsset: true } }, scheduledRevision: { include: { artworkAsset: true, audioAsset: true } }, revisions: { take: 25, orderBy: { revisionNumber: "desc" }, include: { artworkAsset: true, audioAsset: true } }, auditLogs: { orderBy: { createdAt: "desc" }, take: 30, include: { actor: true } } } });
   if (!track) throw new AppError("Track not found.", 404, "TRACK_NOT_FOUND"); return track;
 }
 
