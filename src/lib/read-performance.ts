@@ -13,7 +13,7 @@ export async function measureRead<T>(
   const metrics = { queries: 0, poolWaitCount: 0 };
   return readMetrics.run(metrics, async () => {
     const result = await fn();
-    if (Date.now() - (last.get(service) ?? 0) > 60_000) {
+    if (process.env.CMS_REVEAL_TIMING === "1" || Date.now() - (last.get(service) ?? 0) > 60_000) {
       last.set(service, Date.now());
       log("info", "cms_read", {
         service,

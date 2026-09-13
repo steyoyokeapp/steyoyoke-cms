@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { mediaBrowseQuery } from "@/modules/media/browse";
-import { Suspense } from "react";
+import { revealTiming } from "@/lib/reveal-timing";
+import { RevealProbe } from "@/components/reveal-probe";
 import { listMediaAssets } from "@/modules/media/service";
 import type { Actor } from "@/lib/authorization";
 import type { MediaBrowseState } from "@/modules/media/browse";
@@ -12,7 +13,9 @@ import { parseMediaBrowse } from "@/modules/media/browse";
 export default async function MediaPage({
   searchParams,
 }: PageProps<"/admin/media">) {
+  const timing = revealTiming("cms_media_page");
   const actor = await actorForPage(await headers());
+  timing.mark("sessionCompleteMs");
   const query = await searchParams;
   const browse = parseMediaBrowse(
     new URLSearchParams(
@@ -21,6 +24,10 @@ export default async function MediaPage({
       ),
     ),
   );
+  timing.mark("serviceStartMs");
+  const initialMedia = await InitialMedia({ actor, browse });
+  timing.mark("serviceAndConstructionEndMs");
+  timing.finish();
   return (
     <>
       <section className="page-heading">
@@ -30,16 +37,8 @@ export default async function MediaPage({
           <p className="muted">Managed image and audio assets.</p>
         </div>
       </section>
-      <Suspense
-        fallback={
-          <section className="panel" aria-busy="true">
-            <h2>Media assets</h2>
-            <p>Loading media…</p>
-          </section>
-        }
-      >
-        <InitialMedia actor={actor} browse={browse} />
-      </Suspense>
+      {initialMedia}
+      {process.env.CMS_REVEAL_TIMING === "1" && <RevealProbe kind="media" />}
     </>
   );
 }

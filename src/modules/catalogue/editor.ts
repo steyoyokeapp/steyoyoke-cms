@@ -1,3 +1,4 @@
+import { revealTiming } from "@/lib/reveal-timing";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, type Actor } from "@/lib/authorization";
 import { AppError } from "@/lib/errors";
@@ -177,6 +178,7 @@ export async function podcastEditor(actor: Actor, id: string) {
 export async function releaseEditor(actor: Actor, id: string) {
   requirePermission(actor, "release:read");
   return measureRead("releases.detail", async () => {
+    const timing = revealTiming("cms_release_read");
     const { primaryArtist, secondaryArtist, artworkAsset, tracks, ...r } =
       found(
         await prisma.release.findUnique({
@@ -184,14 +186,16 @@ export async function releaseEditor(actor: Actor, id: string) {
           select: editorSelect.releases,
         }),
       );
+    timing.mark("mainAndRelationshipsEndMs");
     const { labels } = await filterOptions(actor, undefined, r.labelId);
+    timing.mark("pickerBootstrapEndMs");
     const publishedTracks = new Map<string, string>(
       r.publishedRevision?.tracks.map((t) => [
         t.trackRevision.trackId,
         t.trackRevisionId,
       ]) ?? [],
     );
-    return {
+    const result = {
       release: {
         ...r,
         publishedRevision: r.publishedRevision
@@ -215,5 +219,8 @@ export async function releaseEditor(actor: Actor, id: string) {
       })),
       mediaAssets: artworkAsset ? [artworkAsset] : [],
     };
+    timing.mark("dtoEndMs");
+    timing.finish();
+    return result;
   });
 }

@@ -226,3 +226,5 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
 
 .editor-skeleton div {height:2.5rem;background:var(--border, #e5e7eb);opacity:.4;margin:1rem 0;max-width:40rem;border-radius:4px;}
 .search-picker {display:grid;gap:.5rem;}
+
+.navigation-pending { position: absolute; margin-left: .35rem; font-size: .7rem; }

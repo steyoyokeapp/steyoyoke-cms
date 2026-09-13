@@ -1,3 +1,4 @@
+import { revealTiming } from "./reveal-timing";
 import { cache } from "react";
 import { headers as requestHeaders } from "next/headers";
 import { auth } from "@/lib/auth";
@@ -16,7 +17,12 @@ export async function actorFromHeaders(headers: Headers): Promise<Actor> {
   return { userId: session.user.id, role };
 }
 
-export const sessionForPage = cache(async () => auth.api.getSession({headers: await requestHeaders()}));
+export const sessionForPage = cache(async () => {
+  const timing = revealTiming("cms_session");
+  const session = await auth.api.getSession({headers: await requestHeaders()});
+  timing.finish();
+  return session;
+});
 
 export async function actorForPage(_headers?: Headers): Promise<Actor> {
   void _headers; // Kept for compatibility; Next request headers are resolved inside the per-render cache.

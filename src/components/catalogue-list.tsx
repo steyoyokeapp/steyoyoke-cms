@@ -1,3 +1,5 @@
+import { revealTiming } from "@/lib/reveal-timing";
+import { RevealProbe } from "./reveal-probe";
 import Link from "next/link";
 import { actorForPage } from "@/lib/session";
 import { headers } from "next/headers";
@@ -18,15 +20,19 @@ export async function CatalogueList({
   kind: CatalogueKind;
   params: Record<string, string | string[] | undefined>;
 }) {
+  const timing = revealTiming("cms_list_page");
   const actor = await actorForPage(await headers());
+  timing.mark("sessionCompleteMs");
   const query = listQuery(params);
   const filters = browseSchema.parse(Object.fromEntries(query));
+  timing.mark("serviceStartMs");
   const [data, options] = await Promise.all([
     cataloguePage(actor, kind, filters),
     kind === "artists"
       ? Promise.resolve({ artists: [], labels: [] })
       : filterOptions(actor, filters.artistId, filters.labelId),
   ]);
+  timing.mark("serviceEndMs");
   const title = kind.charAt(0).toUpperCase() + kind.slice(1);
   const singular = title.slice(0, -1);
   const base = `/admin/${kind}`;
@@ -36,7 +42,7 @@ export async function CatalogueList({
     q.set("page", String(page));
     return `${base}?${q}`;
   }
-  return (
+  const content = (
     <>
       <section className="page-heading">
         <div>
@@ -146,6 +152,10 @@ export async function CatalogueList({
           </IntentLink>
         ))}
       </section>
+      {process.env.CMS_REVEAL_TIMING === "1" && (kind === "artists" || kind === "podcasts") && <RevealProbe kind={kind} />}
     </>
   );
+  timing.mark("constructedMs");
+  timing.finish();
+  return content;
 }
