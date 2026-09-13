@@ -1,0 +1,17 @@
+.toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 14px 16px; margin-bottom: 18px; }
+.field { display: grid; gap: 6px; flex: 1 1 140px; min-width: 0; margin: 0; }
+.field label { margin: 0; }
+.title { flex: 2 1 200px; }
+.artist { position: relative; flex: 1.4 1 190px; }
+.field input:not([type="hidden"]), .field select, .submit { height: 40px; padding: 8px 10px; }
+.field input, .field select { font-size: .85rem; font-weight: 400; }
+.submit { min-height: 40px; flex: 0 0 auto; align-self: flex-end; }
+.clear { display: flex; align-items: center; height: 40px; font-size: .8rem; text-decoration: underline; }
+.popup { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #cfc8bc; box-shadow: 0 8px 20px #0002; max-height: 280px; overflow-y: auto; }
+.popup ul { list-style: none; margin: 0; padding: 4px; }
+.popup li { padding: 9px 8px; cursor: pointer; font-size: .85rem; overflow-wrap: anywhere; }
+.popup li:hover, .active { background: #f2efe8; }
+.popup li[aria-selected="true"] { font-weight: 700; }
+.popup small, .message { color: #625f5b; }
+.message { padding: 8px 12px; font-size: .8rem; }
+@media (max-width: 480px) { .title, .artist { flex-basis: 100%; } }

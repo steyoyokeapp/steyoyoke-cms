@@ -11,6 +11,7 @@ import {
 } from "@/modules/catalogue/browse";
 import { formatCmsDate } from "@/lib/date";
 import { formatDuration } from "@/modules/tracks/duration";
+import { TracksFilters } from "./tracks-filters";
 import { CatalogueFilters } from "./catalogue-filters";
 import { IntentLink } from "./intent-link";
 export async function CatalogueList({
@@ -42,6 +43,7 @@ export async function CatalogueList({
     q.set("page", String(page));
     return `${base}?${q}`;
   }
+  const FilterComponent = kind === "tracks" ? TracksFilters : CatalogueFilters;
   const content = (
     <>
       <section className="page-heading">
@@ -56,7 +58,7 @@ export async function CatalogueList({
           </Link>
         )}
       </section>
-      <CatalogueFilters
+      <FilterComponent
         key={query.toString()}
         kind={kind}
         filters={filters}
