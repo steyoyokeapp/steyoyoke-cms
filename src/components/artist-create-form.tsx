@@ -29,7 +29,7 @@ export function ArtistCreateForm() {
     }
   }
   return (
-    <form className="panel editor-form" onSubmit={submit}>
+    <form className="panel editor-form catalogue-editor" onSubmit={submit}>
       <label>Artist name<input name="name" required maxLength={160} autoFocus /></label>
       {error && <div className="alert error" role="alert">{error}</div>}
       <div className="button-row"><button className="button primary" disabled={pending}>{pending ? "Creating…" : "Create artist"}</button></div>

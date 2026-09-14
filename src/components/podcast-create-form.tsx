@@ -15,7 +15,7 @@ export function PodcastCreateForm({ artists, labels }: { artists: TrackOption[];
       const body = await response.json(); if (!response.ok) throw new Error(body.error?.message ?? "Could not create Podcast."); router.push(`/admin/podcasts/${body.id}`); router.refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not create Podcast."); setPending(false); }
   }
-  return <form className="panel editor-form" onSubmit={submit}><div className="eyebrow">Core</div>
+  return <form className="panel editor-form catalogue-editor" onSubmit={submit}><div className="eyebrow">Core</div>
     <label>Title<input name="title" required maxLength={255} autoFocus /></label>
     <SearchPicker kind="artist" label="Primary Artist" name="primaryArtistId" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} describe={a=>`${a.name} · #${a.legacyId}`} required/>
     <SearchPicker kind="artist" label="Secondary Artist" name="secondaryArtistId" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} describe={a=>`${a.name} · #${a.legacyId}`} />

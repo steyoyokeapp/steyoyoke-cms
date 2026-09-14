@@ -38,7 +38,7 @@ export function PodcastEditor({ podcast, role, artists, labels, mediaAssets, aud
   async function perform(action: string, extra: Record<string, unknown> = {}) {
     setPending(true); setError(""); try { await readResult(await fetch(`/api/admin/podcasts/${podcast.id}/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) })); window.location.reload(); } catch (caught) { setError(caught instanceof Error ? caught.message : "The operation failed."); setPending(false); }
   }
-  return <div className="editor-grid"><div className="editor-column">
+  return <div className="editor-grid catalogue-editor"><div className="editor-column">
     <section className="panel summary-strip"><span><small>Legacy ID</small><strong className="mono">{podcast.legacyId}</strong></span><span><small>Status</small><i className={`status ${podcast.status.toLowerCase()}`}>{podcast.status}</i></span><span><small>Working version</small><strong className="mono">v{podcast.workingVersion}</strong></span><span><small>Published revision</small><strong className="mono">{podcast.publishedRevision ? `r${podcast.publishedRevision.revisionNumber}` : "—"}</strong></span></section>
     {podcast.publishedRevision && <div className={`change-indicator ${unpublishedChanges ? "changed" : "synced"}`}>{unpublishedChanges ? "Unpublished changes" : "Draft matches published revision"}</div>}
     <form className="panel editor-form" onSubmit={save}><div className="eyebrow">Core</div>

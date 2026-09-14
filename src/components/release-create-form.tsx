@@ -15,7 +15,7 @@ export function ReleaseCreateForm({ artists, labels }: { artists: ReleaseRelatio
       const result = await response.json(); if (!response.ok) throw new Error(result.error?.message ?? "Could not create Release."); router.push(`/admin/releases/${result.id}`); router.refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not create Release."); setPending(false); }
   }
-  return <form className="panel editor-form" onSubmit={submit}>
+  return <form className="panel editor-form catalogue-editor" onSubmit={submit}>
     <div className="eyebrow">Core</div>
     <label>Title<input name="title" required maxLength={255} autoFocus /></label>
 

@@ -74,6 +74,16 @@ textarea { resize: vertical; line-height: 1.55; }
 
 .editor-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(330px, .8fr); gap: 22px; align-items: start; }
 .editor-column, .preview-column { display: grid; gap: 22px; }
+
+/* Catalogue forms use the page width; optional technical sections follow below. */
+.catalogue-editor { width: 100%; min-width: 0; }
+.catalogue-editor.editor-grid { grid-template-columns: minmax(0, 1fr); }
+.catalogue-editor :is(.editor-column, .preview-column, label, .search-picker) { min-width: 0; }
+.catalogue-editor :is(input, select, textarea, .search-picker) { max-width: min(100%, 60rem); min-width: 0; }
+.catalogue-editor .section-heading { flex-wrap: wrap; }
+.catalogue-editor .track-picker { grid-template-columns: minmax(0, 1fr) auto; max-width: 60rem; }
+.catalogue-editor .release-track-row > span { overflow-wrap: anywhere; }
+
 .summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); padding: 20px 24px; box-shadow: none; }
 .summary-strip > span { display: flex; flex-direction: column; gap: 7px; }
 .summary-strip small { color: var(--muted); font-size: .65rem; letter-spacing: .09em; text-transform: uppercase; }
@@ -183,6 +193,7 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
 .track-change-warning { color: #705000; }
 
 @media (max-width: 900px) {
+  .catalogue-editor .track-picker { grid-template-columns: minmax(0, 1fr); }
   .editor-grid { grid-template-columns: 1fr; }
   .media-toolbar { align-items: flex-end; }
   .media-toolbar-actions { flex-wrap: wrap; }
@@ -201,6 +212,10 @@ pre { margin: 18px 0 0; max-height: 360px; overflow: auto; padding: 17px; backgr
   .table-row span:nth-child(4), .table-row span:nth-child(5) { display: none; }
 }
 @media (max-width: 600px) {
+  .catalogue-editor .chapter-row { grid-template-columns: 28px 20px minmax(0, 1fr) minmax(0, 1fr); }
+  .catalogue-editor .chapter-row label { grid-column: 3 / -1; }
+  .catalogue-editor .chapter-actions, .catalogue-editor .release-track-actions { grid-column: 3 / -1; flex-wrap: wrap; }
+
   .topbar { min-height: 66px; }
   .user-menu > span { display: none; }
   .brand-nav nav { display: none; }

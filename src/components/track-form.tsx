@@ -36,7 +36,7 @@ export function TrackForm({ track, artists, labels, role, mediaAssets = [], audi
     try { await request(`/api/admin/tracks/${track.id}/actions`, { action: "archive" }, "POST"); router.push("/admin/tracks"); router.refresh(); }
     catch (caught) { setError((caught as Error).message); dialog.current?.close(); setPending(false); }
   }
-  return <div style={{ maxWidth: 760 }}>
+  return <div className="catalogue-editor">
     <form className="panel editor-form" onSubmit={save}>
       <TrackMediaUpload kind="audio" initial={audioAssets.map(a => ({ ...a, durationMs: a.durationMs ?? track?.durationMs ?? null })).find(a => a.id === track?.audioAssetId)} disabled={disabled || pending} onBusy={setAudioBusy} onReady={asset => {
         setAudioId(asset.id);

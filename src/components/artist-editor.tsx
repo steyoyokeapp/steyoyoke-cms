@@ -44,7 +44,7 @@ export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role:
   }
 
   return (
-    <form className="panel editor-form" onSubmit={save}>
+    <form className="panel editor-form catalogue-editor" onSubmit={save}>
       <label>Artist name<input name="name" value={name} onChange={(event) => setName(event.target.value)} readOnly={!canWrite} required maxLength={160} /></label>
       {error && <div className="alert error" role="alert">{error}</div>}
       {message && <div className="alert success" role="status">{message}</div>}
