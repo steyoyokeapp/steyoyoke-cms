@@ -2,7 +2,7 @@
 import { useEffect, useId, useState } from "react";
 import type { TrackOption } from "./track-create-form";
 import styles from "./tracks-filters.module.css";
-export function TrackArtistCombobox({ label, value, initial, onChange, disabled, required, modern = false }: { label: string; value: string; initial: TrackOption[]; onChange: (id: string) => void; disabled: boolean; required?: boolean; modern?: boolean }) {
+export function TrackArtistCombobox({ label, value, initial, onChange, disabled = false, required, modern = false, name }: { label: string; value: string; initial: TrackOption[]; onChange: (id: string) => void; disabled?: boolean; required?: boolean; modern?: boolean; name?: string }) {
   const id = useId(); const [selected, setSelected] = useState(initial.find(x => x.id === value));
   const [query, setQuery] = useState(selected?.name ?? ""); const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<TrackOption[]>([]); const [active, setActive] = useState(-1); const [error, setError] = useState("");
@@ -22,6 +22,7 @@ export function TrackArtistCombobox({ label, value, initial, onChange, disabled,
   function choose(row?: TrackOption) { setSelected(row); setQuery(row?.name ?? ""); onChange(row?.id ?? ""); setOpen(false); setActive(-1); }
   const choices = [...(selected ? [selected] : []), ...rows.filter(x => x.id !== selected?.id)];
   return <div className={styles.artist} style={{ position: "relative" }}>
+    {name && <input type="hidden" name={name} value={value} />}
     <label htmlFor={id}>{label}</label>
     <div className={modern ? "track-combobox-control" : undefined} style={modern ? undefined : { display: "flex", gap: 8 }}>
       <input id={id} role="combobox" aria-expanded={open} aria-autocomplete="list" aria-controls={`${id}-list`} aria-activedescendant={open && active >= 0 && active < choices.length ? `${id}-${active}` : undefined}

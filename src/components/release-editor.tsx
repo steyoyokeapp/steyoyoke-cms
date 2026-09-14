@@ -1,8 +1,10 @@
 "use client";
+import "./cms-form-design.css";
 
 import { useState, type DragEvent, type FormEvent } from "react";
 import { SecondarySections } from "./secondary-sections";
 import { SearchPicker } from "./search-picker";
+import { TrackArtistCombobox } from "./track-artist-combobox";
 import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
 
 type Revision = { id:string; revisionNumber:number; sourceWorkingVersion:number };
@@ -47,26 +49,27 @@ export function ReleaseEditor({ release, role, artists, labels, tracks, mediaAss
       window.location.reload();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save draft."); setPending(false); }
   }
-  return <div className="editor-grid catalogue-editor release-editor">
+  return <div className="editor-grid catalogue-editor cms-form-design release-editor">
     <div className="editor-column">
       <section className="panel summary-strip"><span><small>Legacy ID</small><strong className="mono">{release.legacyId}</strong></span><span><small>Status</small><i className={`status ${release.status.toLowerCase()}`}>{release.status}</i></span><span><small>Working version</small><strong className="mono">v{release.workingVersion}</strong></span><span><small>Published revision</small><strong className="mono">{release.publishedRevision ? `r${release.publishedRevision.revisionNumber}` : "—"}</strong></span></section>
       {release.publishedRevision && <div className={`change-indicator ${unpublishedChanges ? "changed" : "synced"}`}>{unpublishedChanges ? "Unpublished changes" : "Draft matches published revision"}</div>}
       <form className="panel editor-form" onSubmit={save}>
-        <div className="eyebrow">Core</div>
-        <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} readOnly={!canWrite} required /></label>
-        <SearchPicker kind="artist" label="Primary Artist" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`} required/>
-        <SearchPicker kind="artist" label="Secondary Artist" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`}/>
+        <section className="track-design-section"><div className="track-section-heading"><h2>Release details</h2></div><div className="track-fields-grid cms-core-grid">
+        <label>Title<input placeholder="Release title" value={title} onChange={(event) => setTitle(event.target.value)} readOnly={!canWrite} required /></label>
         <label>Label<select value={labelId} onChange={(event) => setLabelId(event.target.value)} disabled={!canWrite}>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}{label.active === false ? " (inactive · attached)" : ""}</option>)}</select></label>
+    <TrackArtistCombobox modern label="Primary Artist" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} disabled={!canWrite} required/>
+        <TrackArtistCombobox modern label="Secondary Artist" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} disabled={!canWrite}/>
+
         <label>Release Date<input type="date" value={releaseDate} onChange={(event) => setReleaseDate(event.target.value)} readOnly={!canWrite} /></label>
-        <div className="eyebrow section-break">Links</div>
-        {([['spotifyUrl','Spotify'],['beatportUrl','Beatport'],['traxsourceUrl','Traxsource'],['bandcampUrl','Bandcamp'],['appleMusicUrl','Apple Music / iTunes'],['soundcloudUrl','SoundCloud']] as const).map(([key, name]) => <label key={key}>{name}<input type="url" value={links[key]} onChange={(event) => setLinks({ ...links, [key]: event.target.value })} readOnly={!canWrite} placeholder="https://" /></label>)}
-        <div className="section-heading"><div><div className="eyebrow">Tracks</div><h2>Ordered membership</h2><p className="muted">Published Track revisions are frozen when this Release is published.</p></div></div>
+        </div></section><section className="track-design-section"><div className="track-section-heading"><h2>Store links</h2></div><div className="track-fields-grid">
+        {([['spotifyUrl','Spotify'],['beatportUrl','Beatport'],['traxsourceUrl','Traxsource'],['bandcampUrl','Bandcamp'],['appleMusicUrl','Apple Music / iTunes'],['soundcloudUrl','SoundCloud']] as const).map(([key, name]) => <label key={key}>{name}<input type="url" value={links[key]} onChange={(event) => setLinks({ ...links, [key]: event.target.value })} readOnly={!canWrite} placeholder="https://syykrec.com/…" /></label>)}
+        </div></section><section className="track-design-section"><div className="section-heading"><div><div className="eyebrow">Tracks</div><h2>Ordered membership</h2><p className="muted">Published Track revisions are frozen when this Release is published.</p></div></div>
         {canWrite && <div className="track-picker"><SearchPicker kind="track" label="Available Track" value={pickerId} initial={[]} onChange={(id,item:ReleaseTrackOption|undefined)=>{setPickerId(id);if(item)setTrackOptions(current=>[...current.filter(t=>t.id!==id),item]);}} describe={(t:ReleaseTrackOption)=>`${t.title} · ${t.primaryArtistName} · #${t.legacyId} · ${t.status}`} empty="Choose Track"/><button type="button" className="button" disabled={!pickerId || trackIds.includes(pickerId)} onClick={()=>{setTrackIds([...trackIds,pickerId]);setPickerId("");}}>Add Track</button></div>}
         <div className="release-track-list">{selected.length === 0 && <p className="empty-inline">No Tracks selected. At least one published Track is required before publishing.</p>}{selected.map((track, index) => {
           const current = track; const blocked = !track.publishedRevisionId || !["PUBLISHED", "SCHEDULED"].includes(track.status);
           return <div className="release-track-row" key={track.id} draggable={canWrite} onDragStart={() => setDragged(index)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => drop(event, index)}><button type="button" className="drag-handle" aria-label={`Drag Track ${index + 1}`} disabled={!canWrite}>⋮⋮</button><strong className="mono">{index + 1}</strong><span><b>{track.title}</b><small>{track.primaryArtistName} · {track.labelName} · #{track.legacyId} · r{track.publishedRevisionNumber ?? "—"}</small>{blocked && <em className="blocking-warning">Blocks publication: {track.status.toLowerCase()}</em>}{current?.changedSinceReleasePublication && <em className="track-change-warning">Track has changed since this Release was last published.</em>}</span>{canWrite && <div className="release-track-actions"><button type="button" aria-label={`Move Track ${index + 1} up`} onClick={() => move(index, index - 1)} disabled={index === 0}>↑</button><button type="button" aria-label={`Move Track ${index + 1} down`} onClick={() => move(index, index + 1)} disabled={index === selected.length - 1}>↓</button><button type="button" aria-label={`Remove Track ${index + 1}`} onClick={() => setTrackIds(trackIds.filter((id) => id !== track.id))}>Remove</button></div>}</div>;
         })}</div>
-        {error && <div className="alert error" role="alert">{error}</div>}{canWrite && release.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save Draft</button></div>}
+        </section>{error && <div className="alert error" role="alert">{error}</div>}{canWrite && release.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save Draft</button></div>}
       </form>
       <ArtworkPicker value={artworkAssetId} assets={mediaAssets} canWrite={canWrite && release.status !== "ARCHIVED"} requiredForPublish onChange={setArtworkAssetId} />
       {canWrite && <section className="panel publish-panel"><h2>Publication</h2><p className="muted">Publishing freezes Release metadata, Artist and Label delivery values, exact Track revisions, and Track order.</p><div className="button-row wrap">

@@ -1,4 +1,5 @@
 "use client";
+import "./cms-form-design.css";
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -44,8 +45,8 @@ export function ArtistEditor({ artist, role }: { artist: ArtistEditorData; role:
   }
 
   return (
-    <form className="panel editor-form catalogue-editor" onSubmit={save}>
-      <label>Artist name<input name="name" value={name} onChange={(event) => setName(event.target.value)} readOnly={!canWrite} required maxLength={160} /></label>
+    <form className="panel editor-form catalogue-editor cms-form-design cms-artist-form" onSubmit={save}>
+      <label>Artist name<input placeholder="Artist name" name="name" value={name} onChange={(event) => setName(event.target.value)} readOnly={!canWrite} required maxLength={160} /></label>
       {error && <div className="alert error" role="alert">{error}</div>}
       {message && <div className="alert success" role="status">{message}</div>}
       {canWrite && <div className="button-row"><button className="button primary" disabled={pending}>{pending ? "Saving…" : "Save changes"}</button></div>}

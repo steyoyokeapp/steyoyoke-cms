@@ -1,10 +1,11 @@
 "use client";
+import "./cms-form-design.css";
 
 import { useState, type DragEvent, type FormEvent } from "react";
 import type { TrackOption } from "@/components/track-create-form";
 import { formatDuration, parseDuration } from "@/modules/tracks/duration";
 import { SecondarySections } from "./secondary-sections";
-import { SearchPicker } from "./search-picker";
+import { TrackArtistCombobox } from "./track-artist-combobox";
 import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
 import { AudioPicker, type AudioOption } from "@/components/audio-picker";
 
@@ -38,22 +39,23 @@ export function PodcastEditor({ podcast, role, artists, labels, mediaAssets, aud
   async function perform(action: string, extra: Record<string, unknown> = {}) {
     setPending(true); setError(""); try { await readResult(await fetch(`/api/admin/podcasts/${podcast.id}/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) })); window.location.reload(); } catch (caught) { setError(caught instanceof Error ? caught.message : "The operation failed."); setPending(false); }
   }
-  return <div className="editor-grid catalogue-editor"><div className="editor-column">
+  return <div className="editor-grid catalogue-editor cms-form-design"><div className="editor-column">
     <section className="panel summary-strip"><span><small>Legacy ID</small><strong className="mono">{podcast.legacyId}</strong></span><span><small>Status</small><i className={`status ${podcast.status.toLowerCase()}`}>{podcast.status}</i></span><span><small>Working version</small><strong className="mono">v{podcast.workingVersion}</strong></span><span><small>Published revision</small><strong className="mono">{podcast.publishedRevision ? `r${podcast.publishedRevision.revisionNumber}` : "—"}</strong></span></section>
     {podcast.publishedRevision && <div className={`change-indicator ${unpublishedChanges ? "changed" : "synced"}`}>{unpublishedChanges ? "Unpublished changes" : "Draft matches published revision"}</div>}
-    <form className="panel editor-form" onSubmit={save}><div className="eyebrow">Core</div>
-      <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} readOnly={!canWrite} required /></label><SearchPicker kind="artist" label="Primary Artist" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`} required/>
-      <SearchPicker kind="artist" label="Secondary Artist" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`}/>
-      <label>Label<select value={labelId} onChange={(event) => setLabelId(event.target.value)} disabled={!canWrite}>{labels.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active === false ? " (inactive · attached)" : ""}</option>)}</select></label>
+    <form className="panel editor-form" onSubmit={save}><section className="track-design-section"><div className="track-section-heading"><h2>Podcast details</h2></div><div className="track-fields-grid cms-core-grid">
+      <label>Title<input placeholder="Podcast title" value={title} onChange={(event) => setTitle(event.target.value)} readOnly={!canWrite} required /></label><label>Label<select value={labelId} onChange={(event) => setLabelId(event.target.value)} disabled={!canWrite}>{labels.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active === false ? " (inactive · attached)" : ""}</option>)}</select></label>
+    <TrackArtistCombobox modern label="Primary Artist" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} disabled={!canWrite} required/>
+      <TrackArtistCombobox modern label="Secondary Artist" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} disabled={!canWrite}/>
+
       <label>Episode Date<input aria-label="Episode Date" type="date" value={episodeDate} onChange={(event) => setEpisodeDate(event.target.value)} readOnly={!canWrite} /></label><label>Duration <span className="hint">MM:SS or HH:MM:SS</span><input value={duration} onChange={(event) => setDuration(event.target.value)} readOnly={!canWrite} placeholder="58:30" pattern="(?:[0-9]{2}:)?[0-9]{2}:[0-9]{2}" /></label>
-      <div className="section-heading"><div><div className="eyebrow">Chapters</div><p className="muted">Optional, structured, zero-based, and frozen with each publication.</p></div>{canWrite && <button type="button" className="button" onClick={() => setChapters([...chapters, { key: crypto.randomUUID(), artist: "", title: "", legacyReference: "", duration: "" }])}>Add Chapter</button>}</div>
+      </div></section><section className="track-design-section"><div className="section-heading"><div><div className="eyebrow">Chapters</div><p className="muted">Optional, structured, zero-based, and frozen with each publication.</p></div>{canWrite && <button type="button" className="button" onClick={() => setChapters([...chapters, { key: crypto.randomUUID(), artist: "", title: "", legacyReference: "", duration: "" }])}>Add Chapter</button>}</div>
       <div className="chapter-list">{chapters.length === 0 && <p className="empty-inline">No chapters.</p>}{chapters.map((chapter, index) => <div className="chapter-row" key={chapter.key} draggable={canWrite} onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => dropChapter(event, index)}>
         <button type="button" className="drag-handle" aria-label={`Drag Chapter ${index + 1}`} disabled={!canWrite}>☰</button><strong className="mono">{index}</strong>
         <label>Artist<input aria-label={`Chapter ${index + 1} Artist`} value={chapter.artist} onChange={(event) => patchChapter(index, { artist: event.target.value })} readOnly={!canWrite} required /></label><label>Title<input aria-label={`Chapter ${index + 1} Title`} value={chapter.title} onChange={(event) => patchChapter(index, { title: event.target.value })} readOnly={!canWrite} required /></label>
         <label>Legacy Reference<input aria-label={`Chapter ${index + 1} Legacy Reference`} value={chapter.legacyReference} onChange={(event) => patchChapter(index, { legacyReference: event.target.value })} readOnly={!canWrite} /></label><label>Duration<input aria-label={`Chapter ${index + 1} Duration`} value={chapter.duration} onChange={(event) => patchChapter(index, { duration: event.target.value })} readOnly={!canWrite} placeholder="03:45" pattern="(?:[0-9]{2}:)?[0-9]{2}:[0-9]{2}" /></label>
         {canWrite && <div className="chapter-actions"><button type="button" aria-label={`Move Chapter ${index + 1} up`} disabled={index === 0} onClick={() => moveChapter(index, index - 1)}>↑</button><button type="button" aria-label={`Move Chapter ${index + 1} down`} disabled={index === chapters.length - 1} onClick={() => moveChapter(index, index + 1)}>↓</button><button type="button" aria-label={`Remove Chapter ${index + 1}`} onClick={() => setChapters(chapters.filter((_, current) => current !== index))}>Remove</button></div>}
       </div>)}</div>
-      {error && <div className="alert error" role="alert">{error}</div>}{canWrite && podcast.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save Draft</button></div>}
+      </section>{error && <div className="alert error" role="alert">{error}</div>}{canWrite && podcast.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save Draft</button></div>}
     </form>
     <ArtworkPicker value={artworkAssetId} assets={mediaAssets} canWrite={canWrite && podcast.status !== "ARCHIVED"} requiredForPublish onChange={setArtworkAssetId} />
     <AudioPicker value={audioAssetId} assets={audioAssets} canWrite={canWrite && podcast.status !== "ARCHIVED"} requiredForPublish onChange={setAudioAssetId} />

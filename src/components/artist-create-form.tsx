@@ -1,4 +1,5 @@
 "use client";
+import "./cms-form-design.css";
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -29,8 +30,8 @@ export function ArtistCreateForm() {
     }
   }
   return (
-    <form className="panel editor-form catalogue-editor" onSubmit={submit}>
-      <label>Artist name<input name="name" required maxLength={160} autoFocus /></label>
+    <form className="panel editor-form catalogue-editor cms-form-design cms-artist-form" onSubmit={submit}>
+      <label>Artist name<input placeholder="Artist name" name="name" required maxLength={160} autoFocus /></label>
       {error && <div className="alert error" role="alert">{error}</div>}
       <div className="button-row"><button className="button primary" disabled={pending}>{pending ? "Creating…" : "Create artist"}</button></div>
     </form>

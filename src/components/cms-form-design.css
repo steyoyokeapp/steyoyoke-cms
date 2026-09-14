@@ -1,0 +1,110 @@
+/* Approved catalogue form system. Opt-in only; Media and the CMS shell are excluded. */
+.cms-form-design {
+  --control-radius: 11px;
+  --surface-radius: 16px;
+  --control-border: #dcdad4;
+  --control-surface: #faf9f6;
+  --focus-ring: #757c68;
+  --space-field: 16px;
+  --space-section: 32px;
+}
+.cms-form-design > .editor-form { padding: 0; border: 0; background: transparent; box-shadow: none; display: grid; gap: var(--space-section); }
+.cms-form-design .track-design-section { min-width: 0; padding: 28px 32px; border: 1px solid #e3e0d9; border-radius: var(--surface-radius); background: #fffefa; }
+.cms-form-design h2 { font-size: 1.05rem; font-weight: 650; letter-spacing: -.025em; margin: 0 0 8px; }
+.cms-form-design .track-section-heading { margin-bottom: 24px; }
+.cms-form-design .track-section-heading p,
+.cms-form-design .track-media-helper { font-size: .82rem; color: #706e67; line-height: 1.6; margin-bottom: 0; }
+.cms-form-design .track-fields-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; max-width: 1056px; }
+.cms-form-design label { margin: 0; gap: 8px; color: #585750; font-size: .76rem; font-weight: 600; letter-spacing: .01em; }
+.cms-form-design input:not([type=file]), .cms-form-design select { height: 48px; padding: 0 14px; border: 1px solid var(--control-border); border-radius: var(--control-radius); background: var(--control-surface); font-size: .9rem; font-weight: 400; letter-spacing: 0; transition: border-color .15s, box-shadow .15s, background .15s; }
+.cms-form-design input::placeholder { color: #85837b; opacity: 1; }
+.cms-form-design select { appearance: none; padding-right: 40px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23636058' stroke-width='1.5'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E"); background-position: right 14px center; background-repeat: no-repeat; }
+.cms-form-design input:hover:not(:disabled), .cms-form-design select:hover:not(:disabled) { border-color: #aaa99f; }
+.cms-form-design input:focus, .cms-form-design select:focus { background-color: #fff; border-color: var(--focus-ring); box-shadow: 0 0 0 3px #757c6826; }
+.cms-form-design input:user-invalid { border-color: #b65c52; }
+.cms-form-design input:disabled, .cms-form-design input:read-only, .cms-form-design select:disabled { color: #75736c; background-color: #f0eee8; cursor: default; }
+.cms-form-design .track-combobox-control { position: relative; margin-top: 8px; }
+.cms-form-design .track-combobox-control input { padding-right: 48px; }
+.cms-form-design .track-combobox-clear { position: absolute; right: 3px; top: 3px; width: 42px; height: 42px; padding: 0; border: 0; border-radius: 8px; color: #706e67; background: transparent; font-size: 1.3rem; cursor: pointer; }
+.cms-form-design .track-combobox-clear:hover { color: #222; background: #eeece5; }
+.cms-form-design [role=listbox] { padding: 6px; }
+.cms-form-design [role=listbox] li { min-height: 44px; padding: 12px; border-radius: 7px; }
+.cms-form-design [role=listbox] li[aria-selected=true] { background: #ecefe6; color: #394332; }
+.cms-form-design div:has(> [role=listbox]) { border-radius: 12px; border-color: var(--control-border); box-shadow: 0 8px 24px #29251b12; }
+.cms-form-design .button { min-height: 46px; border-radius: var(--control-radius); padding: 0 20px; font-size: .83rem; font-weight: 600; letter-spacing: 0; border-color: var(--control-border); color: #34352f; background: #fffefa; transition: background .15s, border-color .15s; }
+.cms-form-design .button:hover:not(:disabled) { transform: none; background: #efeee8; border-color: #aaa99f; }
+.cms-form-design .button:active:not(:disabled) { background: #e5e4dc; }
+.cms-form-design .button.primary { background: #242720; border-color: #242720; color: #fff; min-width: 164px; }
+.cms-form-design .button.primary:hover:not(:disabled) { background: #3a4032; color: #fff; }
+.cms-form-design .button.danger { border-color: #e7c5bf; background: #fff1ee; color: #9d3d32; }
+.cms-form-design .button.danger:hover:not(:disabled) { background: #f9e2dc; border-color: #c88d83; }
+.cms-form-design .button:disabled { opacity: .5; cursor: not-allowed; }
+.cms-form-design button:focus-visible, .cms-form-design .track-upload-action:focus-within { outline: 3px solid #757c6870; outline-offset: 3px; }
+.cms-form-design .track-media-surface { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; margin-top: 24px; padding: 24px; background: #f8f7f3; border: 1px solid #e4e1d9; border-radius: 14px; max-width: 1056px; min-width: 0; }
+.cms-form-design .track-media-surface.is-empty { align-items: center; border-style: dashed; padding: 28px; }
+.cms-form-design .track-upload-icon { width: 48px; height: 48px; border-radius: 12px; background: #edece5; display: grid; place-items: center; color: #64695b; }
+.cms-form-design .track-media-surface p { margin: 0; font-size: .83rem; color: #5d5e56; max-width: 100%; }
+.cms-form-design .track-media-surface img { border-radius: 12px; background: #eae7df; }
+.cms-form-design .track-media-surface audio { max-width: 100%; height: 44px; }
+.cms-form-design .track-media-state { padding: 5px 9px; border-radius: 6px; background: #e9e7df; color: #5d6054; font-size: .64rem; font-weight: 700; letter-spacing: .07em; }
+.cms-form-design .track-media-state.READY { background: #e8efe1; color: #4a603a; }
+.cms-form-design .track-media-state.FAILED { background: #fae8e3; color: #97392f; }
+.cms-form-design .track-upload-action { position: relative; overflow: hidden; }
+.cms-form-design .track-upload-action input[type=file] { display: block; position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.cms-form-design .track-upload-action:has(input:disabled) { opacity: .5; cursor: wait; }
+.cms-form-design .track-save-row { display: flex; justify-content: flex-end; padding: 0 0 8px; }
+.cms-form-design .track-danger-zone { margin-top: 32px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 24px; padding: 28px 32px; border-radius: 16px; border: 1px solid #ead4ce; background: #faf0ec; }
+.cms-form-design .track-danger-zone h2 { color: #963e34; font-size: .75rem; letter-spacing: .09em; text-transform: uppercase; }
+.cms-form-design .track-danger-zone p { margin: 0; font-size: .82rem; line-height: 1.7; color: #785e57; }
+.cms-form-design dialog { max-width: min(480px, calc(100% - 32px)); padding: 28px; border: 1px solid #ded9cf; border-radius: 16px; box-shadow: 0 16px 60px #0002; }
+.cms-form-design dialog::backdrop { background: #24272066; }
+.cms-form-design dialog .button-row { margin-top: 24px; flex-wrap: wrap; justify-content: flex-end; }
+.cms-form-design .alert { border-radius: 10px; line-height: 1.6; }
+@media (max-width: 650px) {
+  .cms-form-design .track-fields-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .cms-form-design .track-design-section, .cms-form-design .track-danger-zone { padding: 24px 20px; }
+  .cms-form-design .track-media-surface { padding: 20px; }
+  .cms-form-design .track-save-row .button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .cms-form-design :is(input, select, button, .button) { transition: none; } }
+
+/* Existing Podcast/Release controls use the same surfaces without changing workflows. */
+.cms-form-design:is(form):not(.cms-artist-form), .cms-form-design .editor-column > form { display: grid; gap: 32px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.cms-form-design.cms-artist-form { padding: 28px 32px; border-radius: 16px; box-shadow: none; background: #fffefa; border-color: #e3e0d9; max-width: 680px; }
+.cms-form-design.cms-artist-form .button-row { margin-top: 24px; }
+.cms-form-design .editor-column { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+.cms-form-design .editor-column > .panel:not(form), .cms-form-design .preview-column > .panel { border-radius: 16px; border-color: #e3e0d9; background: #fffefa; box-shadow: none; min-width: 0; }
+.cms-form-design .media-picker, .cms-form-design .publish-panel { padding: 28px 32px; }
+.cms-form-design .muted, .cms-form-design .hint { font-size: .82rem; line-height: 1.6; }
+.cms-form-design .search-picker { display: grid; gap: 12px; align-content: start; }
+.cms-form-design .cms-core-grid { align-items: end; }
+.cms-form-design .media-preview, .cms-form-design .audio-preview { padding: 24px; border-radius: 14px; border: 1px solid #e4e1d9; background: #f8f7f3; max-width: 1056px; min-width: 0; flex-wrap: wrap; }
+.cms-form-design :is(.media-preview, .audio-preview) > span { min-width: 0; overflow-wrap: anywhere; }
+.cms-form-design .media-preview img { width: 160px; height: 160px; border-radius: 12px; }
+.cms-form-design .audio-preview audio { max-width: 100%; }
+.cms-form-design .media-picker > .search-picker { max-width: 1056px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 24px 0; }
+.cms-form-design .media-picker > label.button { position: relative; overflow: hidden; min-height: 48px; }
+.cms-form-design .media-picker > label.button:has(input[type=file]) { margin-top: 8px; background: #f8f7f3; border: 1px dashed #dcdad4; border-radius: 14px; padding: 24px; }
+.cms-form-design .media-picker input[type=file] { display: block; position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.cms-form-design .media-picker > label:focus-within { outline: 3px solid #757c6870; outline-offset: 3px; }
+.cms-form-design .button-row { flex-wrap: wrap; gap: 12px; }
+.cms-form-design .publish-panel input { width: auto; max-width: 100%; }
+.cms-form-design .chapter-row, .cms-form-design .release-track-row { border-radius: 12px; background: #f8f7f3; padding: 16px; gap: 12px; }
+.cms-form-design :is(.chapter-actions, .release-track-actions) button, .cms-form-design .drag-handle { border-radius: 10px; min-width: 44px; min-height: 44px; border: 1px solid #dcdad4; background: #fffefa; }
+.cms-form-design :is(.chapter-actions, .release-track-actions) button:hover:not(:disabled) { background: #eeece5; }
+.cms-form-design :is(.chapter-actions, .release-track-actions) button:disabled { opacity: .45; }
+.cms-form-design .empty-inline { border-radius: 12px; padding: 24px; font-size: .82rem; }
+.cms-form-design .preview-column { gap: 12px; }
+.cms-form-design .preview-column > .panel { padding: 20px 24px; background: transparent; }
+.cms-form-design .summary-strip { background: transparent !important; }
+.cms-form-design .chapter-row { grid-template-columns: 44px 24px repeat(4, minmax(0, 1fr)) auto; }
+@media (max-width: 1100px) {
+  .cms-form-design .chapter-row { grid-template-columns: 44px 24px minmax(0, 1fr) minmax(0, 1fr); }
+  .cms-form-design .chapter-row label { grid-column: 3 / -1; }
+  .cms-form-design .chapter-actions { grid-column: 3 / -1; flex-wrap: wrap; }
+}
+@media (max-width: 650px) {
+  .cms-form-design.cms-artist-form, .cms-form-design .media-picker, .cms-form-design .publish-panel { padding: 24px 20px; }
+  .cms-form-design .media-picker > .search-picker { grid-template-columns: minmax(0, 1fr); }
+  .cms-form-design .media-preview, .cms-form-design .audio-preview { padding: 20px; }
+}
