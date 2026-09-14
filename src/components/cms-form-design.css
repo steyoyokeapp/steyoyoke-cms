@@ -108,3 +108,12 @@
   .cms-form-design .media-picker > .search-picker { grid-template-columns: minmax(0, 1fr); }
   .cms-form-design .media-preview, .cms-form-design .audio-preview { padding: 20px; }
 }
+
+.cms-form-design .podcast-chapter-list{display:grid;gap:16px;margin-bottom:20px}
+.cms-form-design .podcast-chapter-card{min-width:0;padding:20px;border:1px solid var(--control-border);border-radius:16px;background:var(--control-surface)}
+.cms-form-design .podcast-chapter-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.cms-form-design .podcast-chapter-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(130px,.55fr);gap:16px}
+.cms-form-design .podcast-chapter-fields>*{min-width:0}
+.cms-form-design .podcast-chapter-heading .chapter-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:700px){.cms-form-design .podcast-chapter-fields{grid-template-columns:minmax(0,1fr)}.cms-form-design .podcast-chapter-card{padding:16px}}
+.cms-form-design > .publish-panel{margin-top:var(--space-section)}

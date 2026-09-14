@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { transcodeTrackAudio } from "../../src/modules/media/transcode-track-audio";
+import { audioLimits, sourceAudioProfile } from "../../src/modules/media/track-audio-contract";
 import { workerDatabaseTarget } from "./database-target";
 
 let pool: Pool;
@@ -78,14 +79,15 @@ async function processJob(id: string) {
   if (!job) return;
   const started = performance.now(); const directory = await mkdtemp(join(tmpdir(), "cms-audio-"));
   try {
-    if (job.sourceStorageKey !== `audio-originals/${job.mediaAssetId}/source.wav` && job.sourceStorageKey !== `audio-originals/${job.mediaAssetId}/source.mp3`) throw new Error("Invalid source identity");
+    const profile = sourceAudioProfile(job.sourceStorageKey, job.mediaAssetId);
+    if (!job.byteSize || job.byteSize > audioLimits(profile).bytes) throw new Error("Audio exceeds the upload size limit.");
     if (!/^[A-Za-z0-9_-]{1,190}$/.test(job.legacyAudioId)) throw new Error("Invalid delivery identity");
     const source = join(directory, "source"); const output = join(directory, "delivery.mp3");
     const object = await s3.send(new GetObjectCommand({ Bucket: sourceBucket, Key: job.sourceStorageKey }));
     if (object.ContentLength !== job.byteSize || object.Metadata?.["media-asset-id"] !== job.mediaAssetId) throw new Error("Source ownership or size mismatch");
     await pipeline(object.Body as NodeJS.ReadableStream, createWriteStream(source));
     if (await hashFile(source) !== job.sha256Checksum) throw new Error("Source checksum mismatch");
-    const result = await transcodeTrackAudio(source, output);
+    const result = await transcodeTrackAudio(source, output, profile);
     const checksum = await hashFile(output); const key = `${job.legacyAudioId}-high.mp3`;
     try {
       await s3.send(new PutObjectCommand({ Bucket: deliveryBucket, Key: key, Body: createReadStream(output), ContentLength: result.byteSize, ContentType: "audio/mpeg", ACL: "public-read", IfNoneMatch: "*", ChecksumSHA256: Buffer.from(checksum, "hex").toString("base64"), Metadata: { "media-asset-id": job.mediaAssetId, sha256: checksum } }));

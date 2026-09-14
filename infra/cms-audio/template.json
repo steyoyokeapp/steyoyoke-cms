@@ -25,8 +25,8 @@
     },
     "Worker": { "Type": "AWS::Lambda::Function", "DependsOn": ["Logs"], "Properties": {
       "FunctionName": "steyoyoke-cms-audio-validation", "PackageType": "Image", "Code": { "ImageUri": { "Ref": "ImageUri" } },
-      "Role": { "Fn::GetAtt": ["WorkerRole", "Arn"] }, "Architectures": ["x86_64"], "MemorySize": 2048, "Timeout": 900,
-      "EphemeralStorage": { "Size": 2048 }, "ReservedConcurrentExecutions": 2,
+      "Role": { "Fn::GetAtt": ["WorkerRole", "Arn"] }, "Architectures": ["x86_64"], "MemorySize": 3008, "Timeout": 900,
+      "EphemeralStorage": { "Size": 4096 }, "ReservedConcurrentExecutions": 2,
       "Environment": { "Variables": { "CMS_AUDIO_DATABASE_SECRET_ARN": { "Ref": "DatabaseSecretArn" }, "CMS_AUDIO_QUEUE_URL": { "Ref": "Queue" }, "CMS_AUDIO_DATABASE_NAME": "steyoyoke_cms_worker_test", "CMS_AUDIO_NEON_BRANCH_ID": "br-twilight-butterfly-b13z46i6" } }
     } },
     "QueueMapping": { "Type": "AWS::Lambda::EventSourceMapping", "Properties": { "FunctionName": { "Ref": "Worker" }, "EventSourceArn": { "Fn::GetAtt": ["Queue", "Arn"] }, "BatchSize": 1, "FunctionResponseTypes": ["ReportBatchItemFailures"], "Enabled": true } },

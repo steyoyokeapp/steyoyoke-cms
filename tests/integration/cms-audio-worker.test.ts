@@ -40,8 +40,8 @@ beforeEach(async () => {
   userId = (await prisma.user.create({ data: { name: "Worker", email: "worker@test.local" } })).id;
 });
 afterAll(async () => { vi.restoreAllMocks(); await prisma.$disconnect(); await rm(directory, { recursive: true, force: true }); });
-async function fixture(bytes: Buffer, extension = "wav") {
-  const id = crypto.randomUUID(); const legacyAudioId = `CMSAUDIOTEST_${id}_1`; const key = `audio-originals/${id}/source.${extension}`;
+async function fixture(bytes: Buffer, extension = "wav", profile = "track") {
+  const id = crypto.randomUUID(); const legacyAudioId = `CMSAUDIOTEST_${id}_1`; const key = `audio-originals/${id}/${profile === "podcast" ? "podcast-source" : "source"}.${extension}`;
   objects.set(`steyoyoke-cms-media/${key}`, { bytes, metadata: { "media-asset-id": id }, checksum: checksum(bytes) });
   await prisma.mediaAsset.create({ data: { id, kind: "AUDIO", status: "PROCESSING", provider: "S3_COMPATIBLE", sourceStorageKey: key, originalFilename: `${legacyAudioId}.${extension}`, legacyAudioId, mimeType: extension === "wav" ? "audio/wav" : "audio/mpeg", byteSize: bytes.length, sha256Checksum: checksum(bytes), createdById: userId } });
   const job = await prisma.mediaProcessingJob.create({ data: { mediaAssetId: id } });
@@ -94,4 +94,12 @@ it("rejects incomplete delivery metadata instead of accepting SQL NULL checks", 
   const asset=await fixture(wav);
   await expect(prisma.mediaAsset.update({where:{id:asset.id},data:{audioDelivery:{}}})).rejects.toThrow(/media_audio_delivery_contract/);
   await expect(prisma.mediaAsset.create({data:{kind:'AUDIO',status:'PROCESSING',provider:'S3_COMPATIBLE',sourceStorageKey:'audio-originals/test-invalid/source.wav',originalFilename:'test-invalid.wav',mimeType:'audio/wav',byteSize:wav.length,sha256Checksum:checksum(wav),legacyAudioId:'CMSAUDIOTEST_invalid_metadata',createdById:userId,audioDelivery:{}}})).rejects.toThrow(/media_audio_delivery_contract/);
+});
+
+it("processes the reserved Podcast source profile with identical delivery and lease guarantees", async () => {
+  const asset = await fixture(wav, "wav", "podcast");
+  expect(await handler({ Records: [{ messageId: "podcast", body: JSON.stringify({ jobId: asset.job.id }) }] })).toEqual({ batchItemFailures: [] });
+  const ready = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } });
+  expect(ready.status).toBe("READY"); expect(ready.sourceStorageKey).toContain("/podcast-source.wav");
+  expect(ready.audioDelivery).toMatchObject({ key: asset.key, bitrate: 128000, channels: 2 });
 });

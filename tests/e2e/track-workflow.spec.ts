@@ -26,7 +26,7 @@ test('simple Track create, bounded Artist selection, edit and operational delete
   await page.getByRole('option',{name:artist.name,exact:true}).click();
   await page.getByRole('combobox',{name:'Secondary Artist',exact:true}).fill(secondary.name);
   await page.getByRole('option',{name:secondary.name,exact:true}).click();
-  await page.getByLabel('Label',{exact:true}).selectOption(labelId);
+  await page.getByRole('combobox',{name:'Label',exact:true}).selectOption(labelId);
   await page.getByLabel('Spotify',{exact:true}).fill('https://example.com/manual');
   await page.locator('input[type="file"]').nth(1).setInputFiles({name:prefix.replaceAll(' ','-')+'.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});
   await expect(page.getByRole('status',{name:'artwork processing status'})).toHaveText('READY',{timeout:20000});

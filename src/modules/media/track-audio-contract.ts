@@ -1,6 +1,19 @@
 // Shared, dependency-free contract for browser, API and worker.
 export const TRACK_AUDIO_MAX_BYTES = 512 * 1024 * 1024;
 export const TRACK_AUDIO_MAX_SECONDS = 30 * 60;
+// Decimal 2 GB stays within the existing PostgreSQL Int byteSize column.
+export const PODCAST_AUDIO_MAX_BYTES = 2_000_000_000;
+export const PODCAST_AUDIO_MAX_SECONDS = 2 * 60 * 60;
+export type AudioProfile = "track" | "podcast";
+export function audioLimits(profile: AudioProfile = "track") {
+  return profile === "podcast" ? { bytes: PODCAST_AUDIO_MAX_BYTES, seconds: PODCAST_AUDIO_MAX_SECONDS } : { bytes: TRACK_AUDIO_MAX_BYTES, seconds: TRACK_AUDIO_MAX_SECONDS };
+}
+// The server-reserved immutable source key carries the processing profile.
+export function sourceAudioProfile(key: string, id: string): AudioProfile {
+  if (key === `audio-originals/${id}/source.mp3` || key === `audio-originals/${id}/source.wav`) return "track";
+  if (key === `audio-originals/${id}/podcast-source.mp3` || key === `audio-originals/${id}/podcast-source.wav`) return "podcast";
+  throw new Error("Invalid source identity");
+}
 export const trackStores = [
   ["spotifyUrl", "Spotify", "spotify"], ["appleMusicUrl", "Apple Music", "applemusic"],
   ["bandcampUrl", "Bandcamp", "bandcamp"], ["beatportUrl", "Beatport", "beatport"],

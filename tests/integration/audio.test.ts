@@ -29,7 +29,7 @@ describe("audio media, publication, and compatibility", () => {
     const legacyAudioId = "legacy file/id";
     const asset = await prisma.mediaAsset.create({ data: { kind: "AUDIO", status: "EXTERNAL", provider: "LEGACY_EXTERNAL", legacyAudioId, createdById: editor.userId } });
     expect(LegacyAudioSerializer.track(asset)).toBe(legacyAudioId);
-    expect(LegacyAudioSerializer.podcast(asset)).toBe("/legacy-audio/legacy%20file%2Fid-high.mp3");
+    expect(LegacyAudioSerializer.podcast(asset)).toBe("https://steyoyokeapp.s3.eu-west-1.amazonaws.com/legacy%20file%2Fid-high.mp3");
     await expect(assertReadyAudio(prisma, asset.id, true)).rejects.toMatchObject({ code: "AUDIO_NOT_READY" });
     await expect(prisma.mediaAsset.create({ data: { kind: "AUDIO", status: "READY", provider: "LEGACY_EXTERNAL", legacyAudioId: "invalid", createdById: editor.userId } })).rejects.toThrow();
   });

@@ -1,50 +1,22 @@
 import { createPublishedArtist } from "./artist-fixtures";
-import {openPreview,choose} from "./performance-helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { testMp3 } from "../fixtures/audio";
-
-async function signIn(page: Page, email: string, password: string) {
-  await page.goto("/sign-in"); await page.getByLabel("Email").fill(email); await page.getByLabel("Password").fill(password); await page.getByRole("button", { name: "Sign in" }).click(); await expect(page).toHaveURL(/\/admin\/artists$/);
-}
-
-async function uploadArtwork(page: Page, name: string) {
-  const response = await page.request.post("/api/admin/media", { headers: { Origin: new URL(page.url()).origin }, multipart: { file: { name, mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") } } });
-  const body = await response.text();
-  if (!response.ok()) throw new Error(`Media upload ${response.status()}: ${body}`);
-  const id = JSON.parse(body).id as string;
-  await expect.poll(async () => (await (await page.request.get(`/api/admin/media/${id}`)).json()).status).toBe("READY");
-  return id;
-}
-
-async function uploadAudio(page: Page, name: string) { const response = await page.request.post("/api/admin/media", { headers: { Origin: new URL(page.url()).origin }, multipart: { kind: "AUDIO", file: { name, mimeType: "audio/mpeg", buffer: testMp3() } } }); const body = await response.text(); if (!response.ok()) throw new Error(`Audio upload ${response.status()}: ${body}`); return JSON.parse(body).id as string; }
-
-async function clickAndWaitForReload(page: Page, name: string) {
-  await Promise.all([
-    page.waitForEvent("load"),
-    page.getByRole("button", { name, exact: true }).click(),
-  ]);
-}
-
-test("Editor completes the structured Podcast publication lifecycle", async ({ page }) => {
-  test.setTimeout(60_000);
-  const suffix = Date.now(); const artistName = `Podcast E2E Artist ${suffix}`; const originalTitle = `Steyoyoke Podcast E2E ${suffix}`; const draftTitle = `Podcast E2E Updated ${suffix}`; const apiKey = process.env.LEGACY_API_KEY_A!;
-  await signIn(page, process.env.SEED_EDITOR_EMAIL!, process.env.SEED_EDITOR_PASSWORD!);
-  const artworkId = await uploadArtwork(page, `podcast-${suffix}.png`); const audioId = await uploadAudio(page, `podcast-${suffix}.mp3`);
-  await createPublishedArtist(page, artistName);
-  await page.getByRole("link", { name: "Podcasts", exact: true }).click(); await page.getByRole("link", { name: "Create Podcast" }).click(); await page.getByLabel("Title").fill(originalTitle); await page.getByLabel("Search Primary Artist").fill(artistName); const podcastArtistValue = await page.getByLabel("Primary Artist", {exact:true}).locator("option").filter({ hasText: artistName }).getAttribute("value"); await page.getByLabel("Primary Artist", {exact:true}).selectOption(podcastArtistValue!); await page.getByLabel("Label").selectOption({ label: "Inner Symphony" }); await page.getByLabel("Episode Date").fill("2026-07-08"); await page.getByLabel("Duration").fill("01:03:45"); await page.getByRole("button", { name: "Create draft" }).click();
-  await expect(page).toHaveURL(/\/admin\/podcasts\/[0-9a-f-]+(?:\?.*)?$/); const legacyId = await page.locator(".summary-strip .mono").first().textContent(); await page.getByRole("button", { name: "Publish now" }).click(); await expect(page.locator(".alert.error")).toContainText("Artwork is required"); await choose(page,"Artwork",artworkId); await page.getByRole("button", { name: "Add Chapter" }).click(); await page.getByRole("button", { name: "Add Chapter" }).click();
-  await page.getByLabel("Chapter 1 Artist").fill("Opening Artist"); await page.getByLabel("Chapter 1 Title").fill("Opening Track"); await page.getByLabel("Chapter 1 Legacy Reference").fill("OPEN-1");
-  await page.getByLabel("Chapter 1 Duration").fill("03:45"); await page.getByLabel("Chapter 2 Artist").fill("Closing Artist"); await page.getByLabel("Chapter 2 Title").fill("Closing Track"); await clickAndWaitForReload(page, "Save Draft"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toHaveText("null");
-  let api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=podcast`, { headers: { "X-Csrf-Token": apiKey } }); expect((await api.json()).tracks).toEqual([]); await page.getByRole("button", { name: "Publish now" }).click(); await expect(page.locator(".alert.error")).toContainText("Audio is required"); await choose(page,"Audio",audioId); await clickAndWaitForReload(page, "Save Draft");
-  await clickAndWaitForReload(page, "Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(`Podcast E2E ${suffix}`); api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=podcast`, { headers: { "X-Csrf-Token": apiKey } }); let delivered = (await api.json()).tracks[0]; expect(delivered.title).toBe(`Podcast E2E ${suffix}`); expect(delivered.artist_feature_times.map((chapter: { title: string }) => chapter.title)).toEqual(["Opening Track", "Closing Track"]);
-  await page.getByLabel("Title", { exact: true }).fill(draftTitle); await page.getByLabel("Chapter 2 Title").fill("Closing Track Edited"); await page.getByRole("button", { name: "Move Chapter 2 up" }).click(); await clickAndWaitForReload(page, "Save Draft"); await expect(page.getByText("Unpublished changes")).toBeVisible(); await openPreview(page); await expect(page.getByTestId("canonical-preview")).toContainText("Closing Track Edited");
-  api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=podcast`, { headers: { "X-Csrf-Token": apiKey } }); delivered = (await api.json()).tracks[0]; expect(delivered.title).toBe(`Podcast E2E ${suffix}`); expect(delivered.artist_feature_times[0].title).toBe("Opening Track");
-  await clickAndWaitForReload(page, "Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(draftTitle); api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=podcast`, { headers: { "X-Csrf-Token": apiKey } }); delivered = (await api.json()).tracks[0]; expect(delivered.title).toBe(draftTitle); expect(delivered.artist_feature_times[0].title).toBe("Closing Track Edited");
-  await page.getByLabel("Schedule time").fill("2099-01-01T12:00"); await clickAndWaitForReload(page, "Schedule"); await expect(page.locator(".summary-strip")).toContainText("SCHEDULED"); await clickAndWaitForReload(page, "Cancel schedule"); await expect(page.locator(".summary-strip")).toContainText("PUBLISHED");
-  await clickAndWaitForReload(page, "Unpublish"); await expect(page.locator(".summary-strip")).toContainText("UNPUBLISHED"); await clickAndWaitForReload(page, "Archive"); await expect(page.locator(".summary-strip")).toContainText("ARCHIVED"); await clickAndWaitForReload(page, "Restore"); await expect(page.locator(".summary-strip")).toContainText("UNPUBLISHED");
+async function login(page: Page, viewer = false) { await page.goto('/sign-in'); await page.getByLabel('Email').fill(process.env[viewer ? 'SEED_VIEWER_EMAIL' : 'SEED_EDITOR_EMAIL']!); await page.getByLabel('Password').fill(process.env[viewer ? 'SEED_VIEWER_PASSWORD' : 'SEED_EDITOR_PASSWORD']!); await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL('**/admin/artists'); }
+async function reload(page: Page, name: string) { await Promise.all([page.waitForEvent('load'), page.getByRole('button', { name, exact: true }).click()]); }
+test('Podcast Create/Edit saves chapters atomically and preserves publication lifecycle', async ({ page }) => {
+  test.setTimeout(90000); await login(page); const suffix=Date.now(); const name=`Podcast UX TEST ${suffix}`; const primary=await createPublishedArtist(page,name);
+  await page.goto('/admin/podcasts/new'); await page.getByLabel('Title',{exact:true}).fill(name); const combo=page.getByRole('combobox',{name:'Primary Artist',exact:true});await combo.fill(name);await page.getByRole('option').filter({hasText:name}).first().waitFor();await combo.press('ArrowDown');await combo.press('Enter');await page.getByRole('combobox',{name:'Label',exact:true}).selectOption({label:'Steyoyoke'});await page.getByLabel('Episode Date',{exact:true}).fill('2026-09-14');
+  for(let i=1;i<=2;i++){await page.getByRole('button',{name:'Add Chapter',exact:true}).click();await page.getByLabel(`Chapter ${i} Title`).fill(`Track ${i}`);await page.getByLabel(`Chapter ${i} Artist`).fill(name);await page.getByLabel(`Chapter ${i} Start time`).fill(i===1?'00:00':'00:01');}
+  const post=page.waitForResponse(r=>r.url().endsWith('/api/admin/podcasts')&&r.request().method()==='POST');await page.getByRole('button',{name:'Create podcast',exact:true}).click();const result=await post;expect(result.status()).toBe(201);const episode=await result.json();await page.waitForURL('**/admin/podcasts/'+episode.id);await expect(page.getByLabel('Chapter 2 Title')).toHaveValue('Track 2');
+  await page.getByRole('button',{name:'Publish now',exact:true}).click();await expect(page.locator('.editor-form [role=alert]')).toContainText('Artwork is required');
+  const headers={Origin:new URL(page.url()).origin};const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64');
+  const image=await page.request.post('/api/admin/media',{headers,multipart:{file:{name:`podcast-${suffix}.png`,mimeType:'image/png',buffer:png}}});expect(image.status()).toBe(201);const art=await image.json();await expect.poll(async()=> (await(await page.request.get('/api/admin/media/'+art.id)).json()).status).toBe('READY');
+  const audio=await page.request.post('/api/admin/media',{headers,multipart:{kind:'AUDIO',file:{name:`podcast-${suffix}.mp3`,mimeType:'audio/mpeg',buffer:testMp3()}}});expect(audio.status()).toBe(201);const sound=await audio.json();
+  const attach=await page.request.patch('/api/admin/podcasts/'+episode.id,{headers,data:{title:name,primaryArtistId:primary.id,labelId:episode.labelId,episodeDate:'2026-09-14',artworkAssetId:art.id,audioAssetId:sound.id,expectedWorkingVersion:1}});expect(attach.status()).toBe(200);await page.reload();await expect(page.locator('audio')).toHaveCount(1);await expect(page.getByLabel('Duration',{exact:true})).toHaveCount(0);
+  await reload(page,'Publish now');const legacy=async()=> (await(await page.request.get(`/index.php/cms/api/${episode.legacyId}?filter=tracks&type=podcast`,{headers:{'X-Csrf-Token':process.env.LEGACY_API_KEY_A!}})).json()).tracks;
+  expect((await legacy())[0].artist_feature_times.map((c:{title:string})=>c.title)).toEqual(['Track 1','Track 2']);
+  await page.getByLabel('Title',{exact:true}).fill(name+' edited');await page.getByRole('button',{name:'Move Chapter 2 up',exact:true}).click();const writes:string[]=[];page.on('request',r=>{if(r.method()==='PATCH'||r.method()==='PUT')writes.push(r.method());});await reload(page,'Save changes');expect(writes).toEqual(['PATCH']);expect((await legacy())[0].title).toBe(name);expect((await legacy())[0].artist_feature_times[0].title).toBe('Track 1');await reload(page,'Publish now');expect((await legacy())[0].artist_feature_times[0].title).toBe('Track 2');
+  await page.getByLabel('Schedule time',{exact:true}).fill('2099-01-01T12:00');await reload(page,'Schedule');await expect(page.locator('.status')).toContainText('SCHEDULED');await reload(page,'Cancel schedule');await reload(page,'Unpublish');await expect(page.locator('.status')).toContainText('UNPUBLISHED');
+  await page.getByRole('button',{name:'Delete / archive podcast',exact:true}).click();await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('button',{name:'Cancel',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();await page.getByRole('button',{name:'Delete / archive podcast',exact:true}).click();await page.getByRole('button',{name:'Confirm archive',exact:true}).click();await page.waitForURL('**/admin/podcasts');expect(await legacy()).toEqual([]);await page.goto('/admin/podcasts/'+episode.id);await expect(page.getByRole('button',{name:'Save changes',exact:true})).toHaveCount(0);await page.getByRole('button',{name:'Restore podcast',exact:true}).click();await reload(page,'Confirm restore');await expect(page.locator('.status')).toContainText('UNPUBLISHED');
 });
-
-test("Viewer can inspect Podcasts but cannot mutate them", async ({ page }) => {
-  await signIn(page, process.env.SEED_VIEWER_EMAIL!, process.env.SEED_VIEWER_PASSWORD!); await page.getByRole("link", { name: "Podcasts", exact: true }).click(); await expect(page.getByRole("link", { name: "Create Podcast" })).toHaveCount(0); const row = page.locator("a.table-row").first(); await expect(row).toBeVisible(); await row.click(); await expect(page.getByRole("button", { name: "Save Draft" })).toHaveCount(0); await expect(page.getByRole("button", { name: "Publish now" })).toHaveCount(0);
-  const denied = await page.request.patch(`/api/admin/podcasts/${new URL(page.url()).pathname.split("/").at(-1)}`, { data: {} }); expect(denied.status()).toBe(403);
-});
+test('Viewer cannot mutate Podcasts',async({page})=>{await login(page,true);await page.goto('/admin/podcasts');await expect(page.getByRole('link',{name:'Create Podcast',exact:true})).toHaveCount(0);await page.locator('a.table-row').first().click();await expect(page.getByRole('button',{name:'Save changes',exact:true})).toHaveCount(0);const r=await page.request.patch('/api/admin/podcasts/'+new URL(page.url()).pathname.split('/').at(-1),{headers:{Origin:new URL(page.url()).origin},data:{}});expect(r.status()).toBe(403);});

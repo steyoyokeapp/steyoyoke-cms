@@ -80,7 +80,10 @@ export async function createPodcast(actor: Actor, input: PodcastDraftInput) {
     return await prisma.$transaction(async (tx) => {
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
-      const episode = await tx.podcastEpisode.create({ data: { id: crypto.randomUUID(), ...draftData(data) } });
+      const next = draftData(data);
+      if (data.audioAssetId) next.durationMs = (await assertReadyAudio(tx, data.audioAssetId, true))!.durationMs;
+      const episode = await tx.podcastEpisode.create({ data: { id: crypto.randomUUID(), ...next } });
+      if (data.chapters?.length) await tx.podcastChapter.createMany({ data: normalizePodcastChapters(data.chapters).map(chapter => ({ ...chapter, episodeId: episode.id })) });
       await auditMediaAttachment(tx, actor, null, episode.artworkAssetId, { contentType: "PODCAST", contentId: episode.id });
       await auditMediaAttachment(tx, actor, null, episode.audioAssetId, { contentType: "PODCAST_AUDIO", contentId: episode.id }, "AUDIO");
       await audit(tx, episode, actor.userId, "CREATE"); return episode;
@@ -98,7 +101,12 @@ export async function updatePodcastDraft(actor: Actor, id: string, input: unknow
       const episode = await lockPodcast(tx, id); assertEditable(episode); assertVersion(episode, data.expectedWorkingVersion);
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label || (!label.active && label.id !== episode.labelId)) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
-      const next = draftData(data); if (data.artworkAssetId === undefined) next.artworkAssetId = episode.artworkAssetId; if (data.audioAssetId === undefined) next.audioAssetId = episode.audioAssetId; const changedFields = Object.keys(next).filter((key) => String(episode[key as keyof PodcastEpisode] ?? "") !== String(next[key as keyof typeof next] ?? ""));
+      const next = draftData(data); if (data.artworkAssetId === undefined) next.artworkAssetId = episode.artworkAssetId; if (data.audioAssetId === undefined) next.audioAssetId = episode.audioAssetId; if (data.durationMs === undefined) next.durationMs = episode.durationMs;
+      if (next.audioAssetId) {
+        const audio = next.audioAssetId !== episode.audioAssetId ? await assertReadyAudio(tx, next.audioAssetId, true) : await tx.mediaAsset.findUnique({ where: { id: next.audioAssetId } });
+        if (audio?.status === "READY") next.durationMs = audio.durationMs;
+        else if (next.audioAssetId === episode.audioAssetId) next.durationMs = episode.durationMs;
+      } const changedFields = Object.keys(next).filter((key) => String(episode[key as keyof PodcastEpisode] ?? "") !== String(next[key as keyof typeof next] ?? ""));
       const updated = await tx.podcastEpisode.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
       await auditMediaAttachment(tx, actor, episode.artworkAssetId, updated.artworkAssetId, { contentType: "PODCAST", contentId: id });
       await auditMediaAttachment(tx, actor, episode.audioAssetId, updated.audioAssetId, { contentType: "PODCAST_AUDIO", contentId: id }, "AUDIO");

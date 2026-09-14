@@ -27,6 +27,8 @@ export class LegacyMediaSerializer {
 export class LegacyAudioSerializer {
   static track(asset: LegacyMediaSource) { return asset?.kind === "AUDIO" && (asset.status === "READY" || asset.status === "EXTERNAL") ? asset.legacyAudioId : null; }
   static podcast(asset: LegacyMediaSource, baseUrl = process.env.LEGACY_AUDIO_BASE_URL || "/legacy-audio") {
-    const id = this.track(asset); if (!id) return null; return `${baseUrl.replace(/\/+$/, "")}/${encodeURIComponent(id)}-high.mp3`;
+    const id = this.track(asset); if (!id) return null;
+    if (asset?.audioDelivery || asset?.status === "EXTERNAL") return `https://steyoyokeapp.s3.eu-west-1.amazonaws.com/${encodeURIComponent(id)}-high.mp3`;
+    return `${baseUrl.replace(/\/+$/, "")}/${encodeURIComponent(id)}-high.mp3`;
   }
 }

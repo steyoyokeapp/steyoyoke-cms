@@ -44,6 +44,7 @@
     "@aws-sdk/client-sqs": "^3.1130.0",
     "@aws-sdk/s3-request-presigner": "^3.1130.0",
     "@better-auth/prisma-adapter": "^1.7.3",
+    "@noble/hashes": "^2.4.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@vercel/functions": "^3.9.7",

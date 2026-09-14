@@ -35,7 +35,7 @@ test("compact Tracks toolbar keeps bounded search, combined filters, pagination 
   await expect(page.getByRole("heading", { name: "Tracks", exact: true })).toBeVisible();
   expect(choices).toEqual([]);
   expect(await response!.text()).not.toContain(`${prefix} choice 31`);
-  const form = page.getByRole("form", { name: "Track filters" });
+  const form = page.getByRole("form", { name: "tracks filters" });
   const title = form.getByLabel("Search title");
   const combo = form.getByRole("combobox", { name: "Artist", exact: true });
   await expect(form.getByLabel("Search Artist filter")).toHaveCount(0);
@@ -87,7 +87,7 @@ test("compact Tracks toolbar keeps bounded search, combined filters, pagination 
   await expect(controls).toHaveCount(5);
   const desktop = await controls.evaluateAll(nodes => nodes.map(n => { const r = n.getBoundingClientRect(); return { top: r.top, height: r.height }; }));
   expect(new Set(desktop.map(r => Math.round(r.top))).size).toBe(1);
-  expect(desktop.every(r => r.height === 40)).toBe(true);
+  expect(desktop.every(r => r.height >= 44 && r.height <= 48)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   const mobile = await form.evaluate(node => { const r = node.getBoundingClientRect(); return { width: r.width, scroll: node.scrollWidth, client: node.clientWidth }; });
   expect(mobile.scroll).toBeLessThanOrEqual(mobile.client);

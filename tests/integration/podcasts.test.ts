@@ -122,3 +122,30 @@ describe("atomic Podcast core and chapter save", () => {
     expect((await prisma.podcastEpisode.findUniqueOrThrow({ where: { id: ep.id } })).title).toBe(ep.title);
   });
 });
+
+describe("Podcast creation with chapters", () => {
+  it("creates the initial ordered tracklist in the same transaction", async () => {
+    const primary = await artist();
+    const created = await createPodcast(editor, { title: "Complete new Podcast", primaryArtistId: primary.id, labelId, chapters: chapterInput });
+    const stored = await getPodcast(editor, created.id);
+    expect(stored.workingVersion).toBe(1);
+    expect(stored.chapters.map(c => ({ title: c.title, position: c.position, durationMs: c.durationMs }))).toEqual(chapterInput.map((c, position) => ({ title: c.title, position, durationMs: c.durationMs })));
+    expect(stored.chapters[0]?.legacyReference).toBe("REF-1");
+  });
+  it("rejects invalid initial chapters without creating a draft", async () => {
+    const primary = await artist();
+    await expect(createPodcast(editor, { title: "Invalid initial tracklist", primaryArtistId: primary.id, labelId, chapters: [{ title: "", artist: "Someone" }] })).rejects.toThrow();
+    expect(await prisma.podcastEpisode.count()).toBe(0);
+  });
+});
+
+it("derives Podcast duration from READY audio and preserves it on ordinary saves", async () => {
+  const primary = await artist(); const ep = await podcast(primary.id);
+  expect(ep.durationMs).toBe(1000);
+  const edited = await updatePodcastDraft(editor, ep.id, { title: "Duration preserved", primaryArtistId: primary.id, labelId, expectedWorkingVersion: 1 });
+  expect(edited.durationMs).toBe(1000);
+  const source = await prisma.mediaAsset.findUniqueOrThrow({ where: { id: audioAssetId } });
+  const replacement = await prisma.mediaAsset.create({ data: { ...source, audioDelivery: undefined, id: crypto.randomUUID(), sourceStorageKey: "test/replacement.mp3", legacyAudioId: crypto.randomUUID(), durationMs: 6993518 } });
+  const replaced = await updatePodcastDraft(editor, ep.id, { title: edited.title, primaryArtistId: primary.id, labelId, audioAssetId: replacement.id, durationMs: 1, expectedWorkingVersion: 2 });
+  expect(replaced.durationMs).toBe(6993518);
+});

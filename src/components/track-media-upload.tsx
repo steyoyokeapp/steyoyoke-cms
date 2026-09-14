@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import type { AudioOption } from "./audio-picker";
 import type { ArtworkOption } from "./artwork-picker";
 import { formatDuration } from "@/modules/tracks/duration";
-import { TRACK_AUDIO_MAX_BYTES, trackAudioFilename } from "@/modules/media/track-audio-contract";
+import { audioLimits, type AudioProfile, trackAudioFilename } from "@/modules/media/track-audio-contract";
+import { hashUpload } from "@/modules/media/hash-upload";
 async function body(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error?.message ?? "Upload failed."); return value; }
-export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy, modern = false }: { kind: "audio" | "artwork"; initial?: AudioOption | ArtworkOption; disabled: boolean; onReady: (asset: AudioOption & ArtworkOption) => void; onBusy: (busy: boolean) => void; modern?: boolean }) {
+export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy, modern = false, audioProfile = "track", artworkAlt = "Track artwork" }: { kind: "audio" | "artwork"; initial?: AudioOption | ArtworkOption; disabled: boolean; onReady: (asset: AudioOption & ArtworkOption) => void; onBusy: (busy: boolean) => void; modern?: boolean; audioProfile?: AudioProfile; artworkAlt?: string }) {
   const [selected, setSelected] = useState(initial); const [state, setState] = useState(""); const [error, setError] = useState(""); const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   async function upload(file: File) {
@@ -16,13 +17,12 @@ export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy, mod
       let asset;
       if (kind === "audio") {
         trackAudioFilename(file.name);
-        if (file.size > TRACK_AUDIO_MAX_BYTES) throw new Error("Choose audio no larger than 512 MiB.");
-        const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-        const sha256 = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
-        const reservation = await body(await fetch("/api/admin/tracks/audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, size: file.size, sha256 }), signal: signal() }));
-        const uploaded = await fetch(reservation.url, { method: "PUT", headers: reservation.headers, body: file, signal: signal(600_000) });
+        if (file.size > audioLimits(audioProfile).bytes) throw new Error(audioProfile === "podcast" ? "Choose audio no larger than 2 GB." : "Choose audio no larger than 512 MiB.");
+        const sha256 = await hashUpload(file, abort.signal);
+        const reservation = await body(await fetch(`/api/admin/${audioProfile === "podcast" ? "podcasts" : "tracks"}/audio`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, size: file.size, sha256 }), signal: signal() }));
+        const uploaded = await fetch(reservation.url, { method: "PUT", headers: reservation.headers, body: file, signal: signal(audioProfile === "podcast" ? 1_800_000 : 600_000) });
         if (!uploaded.ok) throw new Error("Audio upload failed. Please try again.");
-        asset = await body(await fetch(`/api/admin/tracks/audio/${reservation.id}`, { method: "POST", signal: signal() }));
+        asset = await body(await fetch(`/api/admin/${audioProfile === "podcast" ? "podcasts" : "tracks"}/audio/${reservation.id}`, { method: "POST", signal: signal() }));
       } else {
         const data = new FormData(); data.set("file", file);
         asset = await body(await fetch("/api/admin/media", { method: "POST", body: data, signal: signal() }));
@@ -32,7 +32,7 @@ export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy, mod
       for (let attempt = 0; asset.status !== "READY" && asset.status !== "FAILED" && attempt < 240 && Date.now() < deadline; attempt++) {
         await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => { abort.signal.removeEventListener("abort", cancel); resolve(); }, 5000); function cancel() { clearTimeout(timer); reject(new Error("Upload cancelled")); } abort.signal.addEventListener("abort", cancel, { once: true }); });
         if (abort.signal.aborted) return;
-        asset = await body(await fetch(kind === "audio" ? `/api/admin/tracks/audio/${asset.id}` : `/api/admin/media/${asset.id}`, { cache: "no-store", signal: signal() }));
+        asset = await body(await fetch(kind === "audio" ? `/api/admin/${audioProfile === "podcast" ? "podcasts" : "tracks"}/audio/${asset.id}` : `/api/admin/media/${asset.id}`, { cache: "no-store", signal: signal() }));
         setState(asset.status);
       }
       if (asset.status !== "READY") throw new Error(asset.status === "FAILED" ? "Processing failed. Please upload again with a new filename." : "Processing is taking longer than expected. Contact an administrator before uploading again.");
@@ -44,13 +44,13 @@ export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy, mod
   const artwork = kind === "artwork" ? selected as ArtworkOption | undefined : undefined;
   return <section className={modern ? "track-design-section track-upload-section" : undefined}>
     <h2>{kind === "audio" ? "Audio" : "Artwork"}</h2>
-    {modern && <p className="track-media-helper">{kind === "audio" ? "Upload a WAV or MP3. Duration is detected automatically." : "Give this recording a visual identity."}</p>}
+    {modern && <p className="track-media-helper">{kind === "audio" ? (audioProfile === "podcast" ? "Upload a WAV or MP3, up to 2 hours and 2 GB. Duration is detected automatically." : "Upload a WAV or MP3. Duration is detected automatically.") : "Give this recording a visual identity."}</p>}
     <div className={modern ? `track-media-surface ${selected ? "has-media" : "is-empty"}` : undefined}>
     {modern && !selected && <span className="track-upload-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4" /></svg></span>}
     {modern && selected && <span className={`track-media-state ${state || selected.status}`} role="status" aria-label={`${kind} processing status`}>{state || selected.status}</span>}
     {selected && <p style={{ overflowWrap: "anywhere" }}>{selected.originalFilename ?? (audio?.legacyAudioId || "Current artwork")}</p>}
     {audio?.legacyAudioId && <><audio controls preload="none" style={{ width: "100%", maxWidth: 400 }} src={audio.status === "EXTERNAL" ? `https://steyoyokeapp.s3.eu-west-1.amazonaws.com/${encodeURIComponent(audio.legacyAudioId)}-high.mp3` : `/legacy-audio/${encodeURIComponent(audio.legacyAudioId)}-high.mp3`} /><p>Duration: {formatDuration(audio.durationMs) ?? "Unavailable for this historical audio"}</p></>}
-    {artwork?.compatibilityFilename && <img width={160} height={160} style={{ objectFit: "contain" }} alt="Track artwork" src={`/assets/uploads/files/thumbnails/256/${artwork.compatibilityFilename}`} />}
+    {artwork?.compatibilityFilename && <img width={160} height={160} style={{ objectFit: "contain" }} alt={artworkAlt} src={`/assets/uploads/files/thumbnails/256/${artwork.compatibilityFilename}`} />}
     {!disabled && <label className="button track-upload-action">{selected ? `Replace ${kind}` : `Upload ${kind}`}<input hidden type="file" accept={kind === "audio" ? ".wav,.mp3" : "image/jpeg,image/png,image/webp"} disabled={state === "UPLOADING" || state === "PROCESSING"} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void upload(file); }} /></label>}
     </div>
     {state && (!modern || !selected) && <p className={modern ? "track-media-state" : undefined} role="status" aria-label={`${kind} processing status`}>{state}</p>}{error && <p className="alert error" role="alert">{error}</p>}

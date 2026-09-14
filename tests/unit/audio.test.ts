@@ -13,3 +13,10 @@ describe("local audio contract", () => {
   it("formats duration and preserves raw Track versus URL Podcast semantics", () => { expect(formatAudioDuration(287)).toBe("0:00"); expect(formatAudioDuration(3_725_000)).toBe("1:02:05"); expect(LegacyAudioSerializer.track(asset)).toBe("historical_key-17"); expect(LegacyAudioSerializer.podcast(asset, "/legacy-audio/")).toBe("/legacy-audio/historical_key-17-high.mp3"); });
   it("returns null for non-ready or image assets", () => { expect(LegacyAudioSerializer.track({ ...asset, status: "FAILED" })).toBeNull(); expect(LegacyAudioSerializer.track({ ...asset, kind: "IMAGE" })).toBeNull(); });
 });
+
+it("emits publicly playable absolute Podcast URLs for processed and historical S3 audio", () => {
+  const expected = "https://steyoyokeapp.s3.eu-west-1.amazonaws.com/historical_key-17-high.mp3";
+  expect(LegacyAudioSerializer.podcast({ ...asset, status: "EXTERNAL" })).toBe(expected);
+  expect(LegacyAudioSerializer.podcast({ ...asset, provider: "S3_COMPATIBLE", audioDelivery: { bucket: "steyoyokeapp", key: "historical_key-17-high.mp3" } })).toBe(expected);
+  expect(LegacyAudioSerializer.track(asset)).toBe("historical_key-17");
+});
