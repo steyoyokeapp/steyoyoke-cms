@@ -13,10 +13,10 @@ type MediaRow = {
   id: string; kind: "IMAGE" | "AUDIO"; originalFilename: string | null; compatibilityFilename: string | null; legacyAudioId: string | null;
   width: number | null; height: number | null; durationMs: number | null; status: string; mimeType: string | null; byteSize: number | null;
   sha256Checksum: string | null; sourceStorageKey: string | null; failureReason?: string | null; referenceCount: number; references: MediaReference[];
-  createdAt: string; retiredAt?: string | null; createdBy: { name: string }; processingJob?: { status: string } | null;
+  createdAt: string; updatedAt?: string; retiredAt?: string | null; createdBy: { name: string }; processingJob?: { status: string } | null;
   variants: Array<{ variantKey: string; width: number; height: number; byteSize: number; sha256Checksum: string; storageKey: string }>;
 };
-type OptimisticUpload = { id: string; kind: "IMAGE"; originalFilename: string; byteSize: number; previewUrl: string };
+type OptimisticUpload = { id: string; kind: "IMAGE"; originalFilename: string; byteSize: number };
 
 const normalize = (asset: MediaRow) => ({ ...asset, referenceCount: asset.referenceCount ?? 0, references: asset.references ?? [], variants: asset.variants ?? [] });
 const previewUrl = (asset: MediaRow, thumbnail = false) => asset.status === "READY" && asset.compatibilityFilename
@@ -42,7 +42,6 @@ export function MediaManager({ role, initialBrowse, initialPage }: { role: strin
   const [uploadingCount, setUploadingCount] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
-  const optimisticUrls = useRef(new Map<string, string>());
   const canUpload = role !== "VIEWER";
   const currentPage = listing?.key === browseKey ? listing.data : null;
   const visibleAssets = currentPage?.items ?? [];
@@ -61,11 +60,6 @@ export function MediaManager({ role, initialBrowse, initialPage }: { role: strin
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
-
-  useEffect(() => () => {
-    for (const url of optimisticUrls.current.values()) URL.revokeObjectURL(url);
-    optimisticUrls.current.clear();
   }, []);
 
   useEffect(() => {
@@ -135,9 +129,6 @@ export function MediaManager({ role, initialBrowse, initialPage }: { role: strin
   }
 
   function releaseOptimistic(id: string) {
-    const url = optimisticUrls.current.get(id);
-    if (url) URL.revokeObjectURL(url);
-    optimisticUrls.current.delete(id);
     setOptimistic((current) => current.filter((item) => item.id !== id));
   }
 
@@ -145,9 +136,7 @@ export function MediaManager({ role, initialBrowse, initialPage }: { role: strin
     const file = event.target.files?.[0]; if (!file) return;
     const temporaryId = kind === "IMAGE" ? `optimistic:${crypto.randomUUID()}` : null;
     if (temporaryId) {
-      const localPreview = URL.createObjectURL(file);
-      optimisticUrls.current.set(temporaryId, localPreview);
-      setOptimistic((current) => [{ id: temporaryId, kind: "IMAGE", originalFilename: file.name, byteSize: file.size, previewUrl: localPreview }, ...current]);
+      setOptimistic((current) => [{ id: temporaryId, kind: "IMAGE", originalFilename: file.name, byteSize: file.size }, ...current]);
     }
     const uploadFilter = filter === "ALL" || filter === kind ? filter : "ALL";
     if (view !== "ACTIVE" || uploadFilter !== filter || page !== 1) changeBrowseState("ACTIVE", uploadFilter);
@@ -206,12 +195,13 @@ export function MediaManager({ role, initialBrowse, initialPage }: { role: strin
 
   const deleteBlocked = Boolean(selected && (selected.referenceCount > 0 || selected.processingJob?.status === "RUNNING"));
   return <>
+    <div className="cms-form-design cms-list-design cms-media-list">
     <section className="panel media-toolbar">
       <div className="media-toolbar-heading"><div className="eyebrow">Library</div><h2>Media assets</h2></div>
       <div className="media-toolbar-actions">
         <div className="media-tabs" role="tablist" aria-label="Media lifecycle"><button type="button" role="tab" disabled={pendingAction} aria-selected={view === "ACTIVE"} onClick={() => changeBrowseState("ACTIVE", filter)}>Active {currentPage && <span>{currentPage.counts.active}</span>}</button><button type="button" role="tab" disabled={pendingAction} aria-selected={view === "RETIRED"} onClick={() => changeBrowseState("RETIRED", filter)}>Retired {currentPage && <span>{currentPage.counts.retired}</span>}</button></div>
         <select className="media-kind-filter" aria-label="Kind filter" disabled={pendingAction} value={filter} onChange={(event) => changeBrowseState(view, event.target.value as KindFilter)}><option value="ALL">All</option><option value="IMAGE">Images</option><option value="AUDIO">Audio</option></select>
-        {canUpload && <div className="button-row"><label className="button primary">{uploadingCount ? "Uploading…" : "Upload image"}<input hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event, "IMAGE")} /></label><label className="button">Upload MP3<input hidden type="file" accept="audio/mpeg,.mp3" onChange={(event) => onUpload(event, "AUDIO")} /></label></div>}
+        {canUpload && <div className="button-row"><label className="button primary">{uploadingCount ? "Uploading…" : "Upload image"}<input className="media-upload-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => onUpload(event, "IMAGE")} /></label><label className="button">Upload MP3<input className="media-upload-input" type="file" accept="audio/mpeg,.mp3" onChange={(event) => onUpload(event, "AUDIO")} /></label></div>}
       </div>
     </section>
     {error && <div className="alert error" role="alert">{error}</div>}
@@ -221,11 +211,23 @@ export function MediaManager({ role, initialBrowse, initialPage }: { role: strin
         <span role="status">{currentPage ? `${currentPage.total ? (currentPage.page - 1) * currentPage.limit + 1 : 0}–${Math.min(currentPage.page * currentPage.limit, currentPage.total)} of ${currentPage.total} results · Page ${currentPage.page} of ${currentPage.pageCount}` : "Loading media…"}</span>
         <button className="button" disabled={pendingAction || loading || !currentPage || page >= currentPage.pageCount} onClick={() => changeBrowseState(view, filter, page + 1)}>Next</button>
       </div>
-      {!visibleOptimistic.length && !visibleAssets.length ? !currentPage ? null : <div className="empty media-empty"><strong>{view === "RETIRED" ? "No retired media assets." : "No active media assets yet."}</strong><span>{view === "RETIRED" ? "Retired assets remain available here until permanently deleted." : "Upload an image or MP3 to create the first asset."}</span></div> : <div className="media-grid">
-        {visibleOptimistic.map((item) => <div className="media-card optimistic" data-optimistic="true" aria-disabled="true" key={item.id}>{/* eslint-disable-next-line @next/next/no-img-element -- Blob URLs are temporary local previews and cannot use the Next image optimizer. */}<img src={item.previewUrl} alt=""/><strong>{item.originalFilename}</strong><small>{(item.byteSize / 1024).toFixed(1)} KB · Local preview</small><i className="status uploading">UPLOADING</i><small>Sending source…</small></div>)}
-        {visibleAssets.map((asset) => <button type="button" className={`media-card${selected?.id === asset.id ? " selected" : ""}`} aria-pressed={selected?.id === asset.id} key={asset.id} disabled={pendingAction} onClick={() => { setSelectedId(asset.id); setDetailError(""); setConfirmDelete(false); }}>{asset.kind === "IMAGE" && previewUrl(asset, true) ? <img src={previewUrl(asset, true)!} alt="" loading="lazy" decoding="async" width={256} height={256} /> : <span className="audio-tile" aria-hidden="true">{asset.kind === "AUDIO" ? "♫" : "◇"}</span>}<strong>{asset.originalFilename ?? asset.legacyAudioId ?? "External audio"}</strong><small>{asset.kind === "IMAGE" ? `${asset.width}×${asset.height}` : formatAudioDuration(asset.durationMs)} · {asset.byteSize === null ? "external" : `${(asset.byteSize / 1024).toFixed(1)} KB`}</small><i className={`status ${asset.status.toLowerCase()}`}>{asset.status}</i><small>{asset.status === "PROCESSING" ? "Creating representations…" : `${asset.referenceCount} references`} · {formatCmsDate(asset.retiredAt ?? asset.createdAt)} · {asset.createdBy.name}</small></button>)}
+      {!visibleOptimistic.length && !visibleAssets.length ? !currentPage ? null : <div className="empty media-empty"><strong>{view === "RETIRED" ? "No retired media assets." : "No active media assets yet."}</strong><span>{view === "RETIRED" ? "Retired assets remain available here until permanently deleted." : "Upload an image or MP3 to create the first asset."}</span></div> : <div role="table" aria-label="Media assets" className="media-table">
+        <div role="row" className="table-row table-head media-columns">{["Name / Filename", "Type", "Status", "References", "Updated", "Actions"].map(label => <span role="columnheader" key={label}>{label}</span>)}</div>
+        {visibleOptimistic.map((item) => <div role="row" className="table-row media-columns media-row optimistic" data-optimistic="true" aria-disabled="true" key={item.id}><span role="cell"><strong>{item.originalFilename}</strong></span><span role="cell" data-label="Type">Image</span><span role="cell" data-label="Status"><i className="status uploading">UPLOADING</i></span><span role="cell" data-label="References">—</span><span role="cell" data-label="Updated">—</span><span role="cell">Sending source…</span></div>)}
+        {visibleAssets.map((asset) => {
+          const name = asset.originalFilename ?? asset.compatibilityFilename ?? asset.legacyAudioId ?? (asset.kind === "AUDIO" ? "External audio" : "Unnamed image");
+          return <div role="row" className={`table-row media-columns media-row${selected?.id === asset.id ? " selected" : ""}`} key={asset.id}>
+            <span role="cell"><strong>{name}</strong>{asset.kind === "AUDIO" && asset.legacyAudioId && asset.legacyAudioId !== name && <small>{asset.legacyAudioId}</small>}</span>
+            <span role="cell" data-label="Type">{asset.kind === "IMAGE" ? "Image" : "Audio"}</span>
+            <span role="cell" data-label="Status"><i className={`status ${asset.status.toLowerCase()}`}>{asset.status}</i></span>
+            <span role="cell" data-label="References">{asset.referenceCount}</span>
+            <span role="cell" data-label="Updated">{formatCmsDate(asset.updatedAt ?? asset.retiredAt ?? asset.createdAt)}</span>
+            <span role="cell"><button type="button" className="button media-open" aria-label={`Open ${name}`} aria-pressed={selected?.id === asset.id} disabled={pendingAction} onClick={() => { setSelectedId(asset.id); setDetailError(""); setConfirmDelete(false); }}>Open</button></span>
+          </div>;
+        })}
       </div>}
     </section>
+    </div>
     {selected && <section className="panel preview media-detail">
       <div className="media-detail-heading"><div><div className="eyebrow">{selected.kind} detail</div><h2>Asset details</h2></div><i className={`status ${selected.status.toLowerCase()}`}>{selected.status}</i></div>
       <div className="media-detail-grid">

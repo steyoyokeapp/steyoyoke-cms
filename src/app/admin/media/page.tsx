@@ -1,3 +1,6 @@
+import "@/components/cms-form-design.css";
+import "@/components/catalogue-list-design.css";
+import "@/components/media-list-design.css";
 import { redirect } from "next/navigation";
 import { mediaBrowseQuery } from "@/modules/media/browse";
 import { revealTiming } from "@/lib/reveal-timing";
@@ -64,6 +67,7 @@ async function InitialMedia({
         items: initialPage.items.map((asset) => ({
           ...asset,
           createdAt: asset.createdAt.toISOString(),
+          updatedAt: asset.updatedAt.toISOString(),
           retiredAt: asset.retiredAt?.toISOString() ?? null,
           variants: [],
           references: [],

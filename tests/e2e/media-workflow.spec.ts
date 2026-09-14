@@ -1,8 +1,9 @@
+import { testMp3 } from "../fixtures/audio";
 import { artistAction, createPublishedArtist } from "./artist-fixtures";
 import { expect, test, type Page } from "@playwright/test";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
-async function signIn(page: Page, email: string, password: string) { await page.goto("/sign-in"); await page.getByLabel("Email").fill(email); await page.getByLabel("Password").fill(password); await page.getByRole("button", { name: "Sign in" }).click(); await expect(page).toHaveURL(/\/admin\/artists$/); }
+async function signIn(page: Page, email: string, password: string) { await page.goto("/sign-in"); await page.waitForLoadState("networkidle"); await page.getByLabel("Email").fill(email); await page.getByLabel("Password").fill(password); await page.getByRole("button", { name: "Sign in" }).click(); await expect(page).toHaveURL(/\/admin\/artists$/); }
 
 test("Editor uploads local images and Artist delivery follows frozen artwork revisions", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", (error) => errors.push(error.message)); page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
@@ -19,7 +20,7 @@ test("Editor uploads local images and Artist delivery follows frozen artwork rev
   const upload = page.getByText("Upload image", { exact: true }).locator("input").setInputFiles({ name: firstName, mimeType: "image/png", buffer: png });
   const optimistic = page.locator('[data-optimistic="true"]').filter({ hasText: firstName }); await expect(optimistic).toBeVisible(); await expect(optimistic).toContainText("UPLOADING"); await expect(optimistic).not.toHaveJSProperty("tagName", "BUTTON");
   continueUpload(); await upload; await expect(optimistic).toHaveCount(0); await page.unroute("**/api/admin/media");
-  await expect(page.getByText(firstName, { exact: true })).toBeVisible(); await expect(page.locator(".media-card").first()).toContainText("READY"); await expect.poll(() => page.evaluate(() => (window as unknown as { __mediaObjectUrls: { revoked: string[] } }).__mediaObjectUrls.revoked.length)).toBe(1); await expect(page.locator(".preview")).toContainText("ORIGINAL"); await expect(page.locator(".preview")).toContainText("LEGACY_THUMB_80");
+  await expect(page.getByText(firstName, { exact: true })).toBeVisible(); await expect(page.locator(".media-row").first()).toContainText("READY"); await expect.poll(() => page.evaluate(() => (window as unknown as { __mediaObjectUrls: { revoked: string[] } }).__mediaObjectUrls.revoked.length)).toBe(0); await expect(page.locator(".preview")).toContainText("ORIGINAL"); await expect(page.locator(".preview")).toContainText("LEGACY_THUMB_80");
   const { items: assets } = await (await page.request.get("/api/admin/media")).json(); const first = assets.find((asset: { originalFilename: string }) => asset.originalFilename === firstName); expect(first).toBeTruthy();
   const artist = await createPublishedArtist(page, artistName, first.id);
   const legacyId = artist.legacyId;
@@ -40,7 +41,7 @@ test("Editor uploads local images and Artist delivery follows frozen artwork rev
   expect(errors).toEqual([]);
 });
 
-test("Optimistic failure is removed and its local preview URL is revoked", async ({ page }) => {
+test("Optimistic failure is removed without creating a local preview", async ({ page }) => {
   const name = `media-failed-${Date.now()}.png`; await signIn(page, process.env.SEED_EDITOR_EMAIL!, process.env.SEED_EDITOR_PASSWORD!); await page.getByRole("link", { name: "Media", exact: true }).click();
   await page.evaluate(() => {
     const state = { created: [] as string[], revoked: [] as string[] }; Object.assign(window, { __mediaObjectUrls: state });
@@ -53,17 +54,17 @@ test("Optimistic failure is removed and its local preview URL is revoked", async
   const upload = page.getByText("Upload image", { exact: true }).locator("input").setInputFiles({ name, mimeType: "image/png", buffer: png });
   const optimistic = page.locator('[data-optimistic="true"]').filter({ hasText: name }); await expect(optimistic).toContainText("UPLOADING"); releaseFailure(); await upload; await expect(optimistic).toHaveCount(0); await page.unroute("**/api/admin/media"); await expect(page.locator(".alert.error")).toContainText("Image upload failed cleanly.");
   expect(await page.evaluate(() => (window as unknown as { __mediaObjectUrls: { created: string[]; revoked: string[] } }).__mediaObjectUrls)).toMatchObject({ created: expect.any(Array), revoked: expect.any(Array) });
-  expect(await page.evaluate(() => { const value = (window as unknown as { __mediaObjectUrls: { created: string[]; revoked: string[] } }).__mediaObjectUrls; return [value.created.length, value.revoked.length]; })).toEqual([1, 1]);
+  expect(await page.evaluate(() => { const value = (window as unknown as { __mediaObjectUrls: { created: string[]; revoked: string[] } }).__mediaObjectUrls; return [value.created.length, value.revoked.length]; })).toEqual([0, 0]);
 });
 
 test("Admin moves an unreferenced asset from Active to Retired and permanently deletes it with confirmation", async ({ page }) => {
   const name = `media-delete-${Date.now()}.png`; await signIn(page, process.env.SEED_ADMIN_EMAIL!, process.env.SEED_ADMIN_PASSWORD!); await page.getByRole("link", { name: "Media", exact: true }).click();
-  await page.getByText("Upload image", { exact: true }).locator("input").setInputFiles({ name, mimeType: "image/png", buffer: png }); const card = page.locator(".media-card").filter({ hasText: name }); await expect(card).toContainText("READY"); await card.click();
+  await page.getByText("Upload image", { exact: true }).locator("input").setInputFiles({ name, mimeType: "image/png", buffer: png }); const card = page.locator(".media-row").filter({ hasText: name }); await expect(card).toContainText("READY"); await card.getByRole("button").click();
   await page.getByRole("button", { name: "Retire", exact: true }).click(); await expect(card).toHaveCount(0);
   await page.getByRole("tab", { name: /Retired/ }).click(); await expect(page).toHaveURL(/view=retired/); await expect(card).toContainText("RETIRED");
-  await page.getByLabel("Kind filter").selectOption("AUDIO"); await expect(card).toHaveCount(0); await expect(page).toHaveURL(/kind=AUDIO/); await page.getByLabel("Kind filter").selectOption("IMAGE"); await expect(card).toBeVisible(); await card.click();
+  await page.getByLabel("Kind filter").selectOption("AUDIO"); await expect(card).toHaveCount(0); await expect(page).toHaveURL(/kind=AUDIO/); await page.getByLabel("Kind filter").selectOption("IMAGE"); await expect(card).toBeVisible(); await card.getByRole("button").click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click(); const dialog = page.getByRole("dialog", { name: "Delete permanently?" }); await expect(dialog).toContainText("the uploaded source"); await expect(dialog).toContainText("all generated variants"); await expect(dialog).toContainText("This cannot be undone."); await dialog.getByRole("button", { name: "Cancel" }).click(); await expect(dialog).toHaveCount(0);
-  await page.getByRole("button", { name: "Delete permanently", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "DELETE PERMANENTLY", exact: true }).click(); await expect(card).toHaveCount(0); await page.reload(); await expect(page.locator(".media-card").filter({ hasText: name })).toHaveCount(0);
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click(); await page.getByRole("dialog").getByRole("button", { name: "DELETE PERMANENTLY", exact: true }).click(); await expect(card).toHaveCount(0); await page.reload(); await expect(page.locator(".media-row").filter({ hasText: name })).toHaveCount(0);
   expect((await (await page.request.get("/api/admin/media")).json()).items.some((asset: { originalFilename: string }) => asset.originalFilename === name)).toBe(false);
 });
 
@@ -101,9 +102,9 @@ test("Media pagination and lazy details discard stale selections and retain brow
   await page.getByRole("tab",{name:/Active/}).click();
   await expect(page.locator(".media-library-panel").getByRole("status")).toContainText("51 results");
   expect(detailRequests).toEqual([]); await expect(page.locator(".media-detail")).toHaveCount(0);
-  await page.locator(".media-card").filter({ hasText: "Asset A" }).click();
+  await page.locator(".media-row").filter({ hasText: "Asset A" }).getByRole("button").click();
   await expect.poll(() => detailRequests).toEqual([a]);
-  await page.locator(".media-card").filter({ hasText: "Asset B" }).click();
+  await page.locator(".media-row").filter({ hasText: "Asset B" }).getByRole("button").click();
   await expect(page.locator(".media-detail")).toContainText("Selected B reference");
   releaseA(); await expect(page.locator(".media-detail")).not.toContainText("STALE A REFERENCE");
   await page.getByRole("button", { name: "Next", exact: true }).click();
@@ -111,11 +112,47 @@ test("Media pagination and lazy details discard stale selections and retain brow
   await page.getByRole("tab", { name: /Retired/ }).click();
   await expect(page).toHaveURL(/view=retired$/); await expect(page.locator(".media-library-panel").getByRole("status")).toContainText("0 results");
   delayPageTwo = false; releasePageTwo();
-  await expect(page.locator(".media-card")).toHaveCount(0);
-  await page.goBack(); await expect(page).toHaveURL(/page=2/); await expect(page.locator(".media-card")).toContainText("Page two");
+  await expect(page.locator(".media-row")).toHaveCount(0);
+  await page.goBack(); await expect(page).toHaveURL(/page=2/); await expect(page.locator(".media-row")).toContainText("Page two");
   await page.getByLabel("Kind filter").selectOption("AUDIO");
   await expect(page).toHaveURL(/kind=AUDIO$/); await expect(page.locator(".media-library-panel").getByRole("status")).toContainText("Page 1 of 2");
   await expect(page.locator(".media-detail")).toHaveCount(0); expect(detailRequests).toEqual([a, b]);
   // Clicking the current lifecycle tab must not strand the list in a loading state.
   await page.getByRole("tab", { name: /Active/ }).click(); await expect(page.getByRole("button", { name: "Next", exact: true })).toBeEnabled();
+});
+
+
+test("Media MP3 upload opens the correct lazy player without list previews", async ({ page }) => {
+  await signIn(page, process.env.SEED_ADMIN_EMAIL!, process.env.SEED_ADMIN_PASSWORD!);
+  await page.goto("/admin/media"); await page.waitForLoadState("networkidle");
+  const name = `media-audio-${Date.now()}.mp3`;
+  await page.getByText("Upload MP3", { exact: true }).locator("input").setInputFiles({ name, mimeType: "audio/mpeg", buffer: testMp3() });
+  const row = page.locator(".media-row").filter({ hasText: name });
+  await expect(row).toContainText("READY");
+  await expect(page.locator(".media-library-panel img, .media-library-panel audio, .media-grid, .audio-tile")).toHaveCount(0);
+  await row.getByRole("button").click();
+  await expect(page.locator(".media-detail audio")).toHaveAttribute("src", /legacy-audio\/.+-high\.mp3$/);
+  const asset = (await (await page.request.get("/api/admin/media?kind=AUDIO")).json()).items.find((item: { originalFilename: string }) => item.originalFilename === name);
+  await expect(page.locator(".media-detail")).toContainText(asset.id);
+});
+
+test("Media rows and catalogue header use the approved responsive system", async ({ page }) => {
+  await signIn(page, process.env.SEED_ADMIN_EMAIL!, process.env.SEED_ADMIN_PASSWORD!);
+  await page.goto("/admin/media"); await page.waitForLoadState("networkidle");
+  const nav = page.getByRole("navigation", { name: "Catalogue", includeHidden: true });
+  expect(await nav.locator("a").allTextContents()).toEqual(["Podcasts", "Releases", "Tracks", "Artists", "Media"]);
+  await expect(nav.locator('[aria-current="page"]')).toHaveText("Media");
+  expect(await page.getByRole("columnheader").allTextContents()).toEqual(["Name / Filename", "Type", "Status", "References", "Updated", "Actions"]);
+  for (const width of [1440, 430, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    const list = page.locator(".media-library-panel");
+    expect(await list.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(list.locator("img, audio, .audio-tile, .media-grid")).toHaveCount(0);
+    expect(await nav.locator("a").first().evaluate(el => ({ font: getComputedStyle(el).fontSize, weight: getComputedStyle(el).fontWeight }))).toEqual({ font: "16px", weight: "600" });
+  }
+  await page.setViewportSize({width:1440,height:900});
+  await page.getByRole("button", {name:/^Open /}).first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".media-detail")).toBeVisible();
 });

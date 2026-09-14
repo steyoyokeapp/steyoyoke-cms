@@ -160,7 +160,7 @@ export async function listMediaAssets(actor: Actor, options: Partial<MediaBrowse
     select: {
       id: true, kind: true, provider: true, status: true, originalFilename: true, legacyAudioId: true,
       mimeType: true, byteSize: true, width: true, height: true, durationMs: true, compatibilityFilename: true,
-      sha256Checksum: true, sourceStorageKey: true, failureReason: true, retiredAt: true, createdAt: true,
+      sha256Checksum: true, sourceStorageKey: true, failureReason: true, retiredAt: true, createdAt: true, updatedAt: true,
       createdBy: { select: { name: true } },
       // Prisma folds these relation counts into the page query. No reference rows are materialized.
       _count: { select: {

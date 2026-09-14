@@ -61,7 +61,7 @@ test("initial navigation bounds data, defers history, and streams Media without 
       const detailStart = Date.now();
       await rows.first().click();
       if (kind === "Artists") await expect(page.getByLabel("Artist name")).toBeVisible();
-      else await expect(page.getByRole("button", { name: "Revision history", exact: true })).toBeVisible();
+      else await expect(page.getByLabel("Title", { exact: true })).toBeVisible();
       timings.push({ page: kind + " detail", ms: Date.now() - detailStart });
       expect(await page.locator("select option").count()).toBeLessThan(40);
       await expect(page.getByTestId("canonical-preview")).toHaveCount(0);
@@ -70,7 +70,7 @@ test("initial navigation bounds data, defers history, and streams Media without 
   expect(secondary).toEqual([]);
   expect(choices).toEqual([]);
   await page.evaluate(() => {
-    const metrics: { start: number; shellMs?: number; cardsMs?: number } = {
+    const metrics: { start: number; shellMs?: number; rowsMs?: number } = {
       start: performance.now(),
     };
     (window as unknown as { mediaMetrics: typeof metrics }).mediaMetrics =
@@ -82,7 +82,7 @@ test("initial navigation bounds data, defers history, and streams Media without 
       )
         metrics.shellMs = performance.now() - metrics.start;
       if (document.querySelector('.media-library-panel[aria-busy="false"]')) {
-        metrics.cardsMs = performance.now() - metrics.start;
+        metrics.rowsMs = performance.now() - metrics.start;
         observer.disconnect();
       }
     });
@@ -98,13 +98,13 @@ test("initial navigation bounds data, defers history, and streams Media without 
     "aria-busy",
     "false",
   );
-  expect(await page.locator(".media-card").count()).toBe(50);
+  expect(await page.locator(".media-row").count()).toBe(50);
   expect(mediaLists).toEqual([]);
   timings.push({ page: "Media populated", ms: Date.now() - start });
   const mediaMetrics = await page.evaluate(() => {
     const m = (
       window as unknown as {
-        mediaMetrics: { start: number; shellMs: number; cardsMs: number };
+        mediaMetrics: { start: number; shellMs: number; rowsMs: number };
       }
     ).mediaMetrics;
     return {
@@ -118,19 +118,20 @@ test("initial navigation bounds data, defers history, and streams Media without 
           ttfb: (x as PerformanceResourceTiming).responseStart - x.startTime,
           path: new URL(x.name).pathname,
         })),
-      images: [...document.querySelectorAll(".media-card img")].length,
-      cards: document.querySelectorAll(".media-card").length,
+      images: [...document.querySelectorAll(".media-row img")].length,
+      rows: document.querySelectorAll(".media-row").length,
     };
   });
   console.log("LOCAL_PRODUCTION_NAVIGATION", JSON.stringify(timings));
   console.log("MEDIA_STAGES", JSON.stringify(mediaMetrics));
+  expect(mediaMetrics.images).toBe(0);
   await page.goto("/admin/media?page=99999");
   await expect(page).not.toHaveURL(/page=99999/);
   await expect(page.locator(".media-library-panel")).toHaveAttribute(
     "aria-busy",
     "false",
   );
-  expect(await page.locator(".media-card").count()).toBeLessThanOrEqual(50);
+  expect(await page.locator(".media-row").count()).toBeLessThanOrEqual(50);
 });
 test("history is authenticated and bounded, external audio is excluded, and filters preserve list state", async ({
   page,
@@ -209,27 +210,22 @@ test("picker search cancels stale results and keeps a chosen value across anothe
     });
   });
   await page
-    .getByRole("textbox", { name: "Search Primary Artist", exact: true })
+    .getByRole("combobox", { name: "Primary Artist", exact: true })
     .fill("slow");
   await expect.poll(() => seenA).toBe(true);
   await page
-    .getByRole("textbox", { name: "Search Primary Artist", exact: true })
+    .getByRole("combobox", { name: "Primary Artist", exact: true })
     .fill("latest");
   const select = page.getByRole("combobox", {
     name: "Primary Artist",
     exact: true,
   });
-  await expect(select.locator(`option[value="${selectedId}"]`)).toHaveCount(1);
-  await select.selectOption(selectedId);
+  await expect(page.getByRole("listbox").getByRole("option", { name: "Latest choice", exact: true })).toBeVisible();
+  await page.getByRole("listbox").getByRole("option", { name: "Latest choice", exact: true }).click();
   releaseA();
-  await page
-    .getByRole("textbox", { name: "Search Primary Artist", exact: true })
-    .fill("empty");
-  await expect(select).toHaveValue(selectedId);
-  await expect(
-    select.locator("option").filter({ hasText: "Stale result" }),
-  ).toHaveCount(0);
-  await expect(
-    select.locator("option").filter({ hasText: "Latest choice" }),
-  ).toHaveCount(1);
+  await select.fill("empty");
+  await expect(page.getByRole("listbox").getByRole("option", { name: "Latest choice", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("listbox").getByRole("option", { name: "Stale result", exact: true })).toHaveCount(0);
+  await select.press("Escape");
+  await expect(select).toHaveValue("Latest choice");
 });
