@@ -1,4 +1,5 @@
 "use client";
+import "./track-edit-design.css";
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { TrackEditorData } from "./track-editor";
@@ -36,9 +37,9 @@ export function TrackForm({ track, artists, labels, role, mediaAssets = [], audi
     try { await request(`/api/admin/tracks/${track.id}/actions`, { action: "archive" }, "POST"); router.push("/admin/tracks"); router.refresh(); }
     catch (caught) { setError((caught as Error).message); dialog.current?.close(); setPending(false); }
   }
-  return <div className="catalogue-editor">
+  return <div className={`catalogue-editor${track ? " track-edit-design" : ""}`}>
     <form className="panel editor-form" onSubmit={save}>
-      <TrackMediaUpload kind="audio" initial={audioAssets.map(a => ({ ...a, durationMs: a.durationMs ?? track?.durationMs ?? null })).find(a => a.id === track?.audioAssetId)} disabled={disabled || pending} onBusy={setAudioBusy} onReady={asset => {
+      <TrackMediaUpload modern={!!track} kind="audio" initial={audioAssets.map(a => ({ ...a, durationMs: a.durationMs ?? track?.durationMs ?? null })).find(a => a.id === track?.audioAssetId)} disabled={disabled || pending} onBusy={setAudioBusy} onReady={asset => {
         setAudioId(asset.id);
         if (asset.originalFilename) {
           const defaults = defaultTrackStores(asset.originalFilename);
@@ -46,17 +47,26 @@ export function TrackForm({ track, artists, labels, role, mediaAssets = [], audi
           setCatalogueMessage(trackAudioFilename(asset.originalFilename).catalogue ? "" : "Catalogue could not be identified. Enter store links manually.");
         }
       }} />
+      {track ? <section className="track-design-section"><div className="track-section-heading"><h2>Track details</h2><p>The essential information for this recording.</p></div><div className="track-fields-grid">
+        <label>Title<input placeholder="Track title" value={title} onChange={e => setTitle(e.target.value)} required maxLength={255} readOnly={disabled} /></label>
+        <label htmlFor="track-label">Label<select id="track-label" value={label} onChange={e => setLabel(e.target.value)} required disabled={disabled}><option value="" disabled>Choose Label</option>{labels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+        <TrackArtistCombobox modern label="Primary Artist" value={primary} initial={artists} onChange={setPrimary} required disabled={disabled} />
+        <TrackArtistCombobox modern label="Secondary Artist" value={secondary} initial={artists} onChange={setSecondary} disabled={disabled} />
+      </div></section> : <>
       <label>Title<input value={title} onChange={e => setTitle(e.target.value)} required maxLength={255} readOnly={disabled} /></label>
       <TrackArtistCombobox label="Primary Artist" value={primary} initial={artists} onChange={setPrimary} required disabled={disabled} />
       <TrackArtistCombobox label="Secondary Artist" value={secondary} initial={artists} onChange={setSecondary} disabled={disabled} />
       <label htmlFor="track-label">Label</label><select id="track-label" value={label} onChange={e => setLabel(e.target.value)} required disabled={disabled}><option value="" disabled>Choose Label</option>{labels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
-      <TrackMediaUpload kind="artwork" initial={mediaAssets.find(a => a.id === track?.artworkAssetId)} disabled={disabled || pending} onBusy={setArtworkBusy} onReady={asset => setArtworkId(asset.id)} />
-      <h2>Store links</h2>{catalogueMessage && <p className="muted">{catalogueMessage}</p>}
-      {trackStores.map(([key, name]) => <label key={key}>{name}<input type="url" value={links[key]} readOnly={disabled} placeholder="https://" onChange={e => { touched.current.add(key); setLinks({ ...links, [key]: e.target.value }); }} /></label>)}
+      </>}
+      <TrackMediaUpload modern={!!track} kind="artwork" initial={mediaAssets.find(a => a.id === track?.artworkAssetId)} disabled={disabled || pending} onBusy={setArtworkBusy} onReady={asset => setArtworkId(asset.id)} />
+      <section className={track ? "track-design-section track-stores" : undefined}>
+      {track ? <div className="track-section-heading"><h2>Store links</h2><p>Where listeners can find this Track.</p></div> : <h2>Store links</h2>}{catalogueMessage && <p className="muted">{catalogueMessage}</p>}
+      <div className={track ? "track-fields-grid" : undefined}>{trackStores.map(([key, name]) => <label key={key}>{name}<input type="url" value={links[key]} readOnly={disabled} placeholder={track ? "https://syykrec.com/…" : "https://"} onChange={e => { touched.current.add(key); setLinks({ ...links, [key]: e.target.value }); }} /></label>)}</div>
+      </section>
       {error && <p className="alert error" role="alert">{error}</p>}
-      {!disabled && <button className="button primary" disabled={busy}>{pending ? "Saving…" : track ? "Save changes" : "Create track"}</button>}
+      {!disabled && <div className={track ? "track-save-row" : undefined}><button className="button primary" disabled={busy}>{pending ? "Saving…" : track ? "Save changes" : "Create track"}</button></div>}
     </form>
-    {track && !disabled && <section className="panel" style={{ marginTop: 24 }}><h2>Danger zone</h2><button type="button" className="button danger" disabled={busy} onClick={() => dialog.current?.showModal()}>Delete track</button>
+    {track && !disabled && <section className="track-danger-zone"><div><h2>Danger zone</h2><p>Remove this Track from the active catalogue.<br />Historical releases and audio will be preserved.</p></div><button type="button" className="button danger" disabled={busy} onClick={() => dialog.current?.showModal()}>Delete track</button>
       <dialog ref={dialog} aria-labelledby="delete-track-title"><h2 id="delete-track-title">Delete track?</h2><p>This removes the Track from the active catalogue workflow. Historical releases and audio will be preserved.</p><div className="button-row"><button className="button" disabled={pending} onClick={() => dialog.current?.close()}>Cancel</button><button className="button danger" disabled={pending} onClick={remove}>Confirm delete</button></div></dialog>
     </section>}
     {track?.status === "ARCHIVED" && <p>This Track has been deleted from the active workflow.</p>}

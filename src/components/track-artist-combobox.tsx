@@ -2,7 +2,7 @@
 import { useEffect, useId, useState } from "react";
 import type { TrackOption } from "./track-create-form";
 import styles from "./tracks-filters.module.css";
-export function TrackArtistCombobox({ label, value, initial, onChange, disabled, required }: { label: string; value: string; initial: TrackOption[]; onChange: (id: string) => void; disabled: boolean; required?: boolean }) {
+export function TrackArtistCombobox({ label, value, initial, onChange, disabled, required, modern = false }: { label: string; value: string; initial: TrackOption[]; onChange: (id: string) => void; disabled: boolean; required?: boolean; modern?: boolean }) {
   const id = useId(); const [selected, setSelected] = useState(initial.find(x => x.id === value));
   const [query, setQuery] = useState(selected?.name ?? ""); const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<TrackOption[]>([]); const [active, setActive] = useState(-1); const [error, setError] = useState("");
@@ -23,13 +23,13 @@ export function TrackArtistCombobox({ label, value, initial, onChange, disabled,
   const choices = [...(selected ? [selected] : []), ...rows.filter(x => x.id !== selected?.id)];
   return <div className={styles.artist} style={{ position: "relative" }}>
     <label htmlFor={id}>{label}</label>
-    <div style={{ display: "flex", gap: 8 }}>
+    <div className={modern ? "track-combobox-control" : undefined} style={modern ? undefined : { display: "flex", gap: 8 }}>
       <input id={id} role="combobox" aria-expanded={open} aria-autocomplete="list" aria-controls={`${id}-list`} aria-activedescendant={open && active >= 0 && active < choices.length ? `${id}-${active}` : undefined}
-        placeholder="Start typing artist name…" autoComplete="off" maxLength={200} disabled={disabled} required={required} value={query}
+        placeholder={modern ? "Search artist…" : "Start typing artist name…"} autoComplete="off" maxLength={200} disabled={disabled} required={required} value={query}
         onFocus={() => setOpen(true)} onBlur={() => { setOpen(false); setQuery(selected?.name ?? ""); }}
         onChange={e => { setQuery(e.target.value); setRows([]); setActive(-1); setOpen(true); }}
         onKeyDown={e => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setOpen(true); setActive(i => Math.max(0, Math.min(choices.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))); } else if (e.key === "Enter" && open) { e.preventDefault(); if (choices[active]) choose(choices[active]); } else if (e.key === "Escape") { setOpen(false); setQuery(selected?.name ?? ""); } }} />
-      {selected && !disabled && <button type="button" className="button" aria-label={`Clear ${label}`} onClick={() => choose()}>Clear</button>}
+      {selected && !disabled && <button type="button" className={modern ? "track-combobox-clear" : "button"} aria-label={`Clear ${label}`} onClick={() => choose()}>{modern ? "×" : "Clear"}</button>}
     </div>
     {open && <div className={styles.popup}><ul id={`${id}-list`} role="listbox" aria-label={`${label} choices`}>
       {choices.map((row, index) => <li id={`${id}-${index}`} key={row.id} role="option" aria-selected={row.id === value} className={index === active ? styles.active : undefined} onMouseDown={e => e.preventDefault()} onClick={() => choose(row)}>{row.name}</li>)}

@@ -5,7 +5,7 @@ import type { ArtworkOption } from "./artwork-picker";
 import { formatDuration } from "@/modules/tracks/duration";
 import { TRACK_AUDIO_MAX_BYTES, trackAudioFilename } from "@/modules/media/track-audio-contract";
 async function body(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error?.message ?? "Upload failed."); return value; }
-export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy }: { kind: "audio" | "artwork"; initial?: AudioOption | ArtworkOption; disabled: boolean; onReady: (asset: AudioOption & ArtworkOption) => void; onBusy: (busy: boolean) => void }) {
+export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy, modern = false }: { kind: "audio" | "artwork"; initial?: AudioOption | ArtworkOption; disabled: boolean; onReady: (asset: AudioOption & ArtworkOption) => void; onBusy: (busy: boolean) => void; modern?: boolean }) {
   const [selected, setSelected] = useState(initial); const [state, setState] = useState(""); const [error, setError] = useState(""); const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   async function upload(file: File) {
@@ -42,12 +42,17 @@ export function TrackMediaUpload({ kind, initial, disabled, onReady, onBusy }: {
   }
   const audio = kind === "audio" ? selected as AudioOption | undefined : undefined;
   const artwork = kind === "artwork" ? selected as ArtworkOption | undefined : undefined;
-  return <section>
+  return <section className={modern ? "track-design-section track-upload-section" : undefined}>
     <h2>{kind === "audio" ? "Audio" : "Artwork"}</h2>
+    {modern && <p className="track-media-helper">{kind === "audio" ? "Upload a WAV or MP3. Duration is detected automatically." : "Give this recording a visual identity."}</p>}
+    <div className={modern ? `track-media-surface ${selected ? "has-media" : "is-empty"}` : undefined}>
+    {modern && !selected && <span className="track-upload-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4" /></svg></span>}
+    {modern && selected && <span className={`track-media-state ${state || selected.status}`} role="status" aria-label={`${kind} processing status`}>{state || selected.status}</span>}
     {selected && <p style={{ overflowWrap: "anywhere" }}>{selected.originalFilename ?? (audio?.legacyAudioId || "Current artwork")}</p>}
     {audio?.legacyAudioId && <><audio controls preload="none" style={{ width: "100%", maxWidth: 400 }} src={audio.status === "EXTERNAL" ? `https://steyoyokeapp.s3.eu-west-1.amazonaws.com/${encodeURIComponent(audio.legacyAudioId)}-high.mp3` : `/legacy-audio/${encodeURIComponent(audio.legacyAudioId)}-high.mp3`} /><p>Duration: {formatDuration(audio.durationMs) ?? "Unavailable for this historical audio"}</p></>}
     {artwork?.compatibilityFilename && <img width={160} height={160} style={{ objectFit: "contain" }} alt="Track artwork" src={`/assets/uploads/files/thumbnails/256/${artwork.compatibilityFilename}`} />}
-    {!disabled && <label className="button">{selected ? `Replace ${kind}` : `Upload ${kind}`}<input hidden type="file" accept={kind === "audio" ? ".wav,.mp3" : "image/jpeg,image/png,image/webp"} disabled={state === "UPLOADING" || state === "PROCESSING"} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void upload(file); }} /></label>}
-    {state && <p role="status" aria-label={`${kind} processing status`}>{state}</p>}{error && <p className="alert error" role="alert">{error}</p>}
+    {!disabled && <label className="button track-upload-action">{selected ? `Replace ${kind}` : `Upload ${kind}`}<input hidden type="file" accept={kind === "audio" ? ".wav,.mp3" : "image/jpeg,image/png,image/webp"} disabled={state === "UPLOADING" || state === "PROCESSING"} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void upload(file); }} /></label>}
+    </div>
+    {state && (!modern || !selected) && <p className={modern ? "track-media-state" : undefined} role="status" aria-label={`${kind} processing status`}>{state}</p>}{error && <p className="alert error" role="alert">{error}</p>}
   </section>;
 }
