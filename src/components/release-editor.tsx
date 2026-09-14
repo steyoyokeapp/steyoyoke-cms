@@ -47,7 +47,7 @@ export function ReleaseEditor({ release, role, artists, labels, tracks, mediaAss
       window.location.reload();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save draft."); setPending(false); }
   }
-  return <div className="editor-grid catalogue-editor">
+  return <div className="editor-grid catalogue-editor release-editor">
     <div className="editor-column">
       <section className="panel summary-strip"><span><small>Legacy ID</small><strong className="mono">{release.legacyId}</strong></span><span><small>Status</small><i className={`status ${release.status.toLowerCase()}`}>{release.status}</i></span><span><small>Working version</small><strong className="mono">v{release.workingVersion}</strong></span><span><small>Published revision</small><strong className="mono">{release.publishedRevision ? `r${release.publishedRevision.revisionNumber}` : "—"}</strong></span></section>
       {release.publishedRevision && <div className={`change-indicator ${unpublishedChanges ? "changed" : "synced"}`}>{unpublishedChanges ? "Unpublished changes" : "Draft matches published revision"}</div>}

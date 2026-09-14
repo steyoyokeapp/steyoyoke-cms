@@ -83,6 +83,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .catalogue-editor .section-heading { flex-wrap: wrap; }
 .catalogue-editor .track-picker { grid-template-columns: minmax(0, 1fr) auto; max-width: 60rem; }
 .catalogue-editor .release-track-row > span { overflow-wrap: anywhere; }
+.release-editor .media-preview > span { min-width: 0; overflow-wrap: anywhere; }
 
 .summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); padding: 20px 24px; box-shadow: none; }
 .summary-strip > span { display: flex; flex-direction: column; gap: 7px; }
