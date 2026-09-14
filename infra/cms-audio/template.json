@@ -1,0 +1,37 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Isolated CMS audio worker validation; no production database or Ethereal resources",
+  "Parameters": {
+    "ImageUri": { "Type": "String" },
+    "DatabaseSecretArn": { "Type": "String", "AllowedPattern": "arn:aws:secretsmanager:eu-west-1:597848491835:secret:steyoyoke/cms/audio-worker-test/database-.*" }
+  },
+  "Resources": {
+    "DeadLetterQueue": { "Type": "AWS::SQS::Queue", "Properties": { "QueueName": "steyoyoke-cms-audio-validation-dlq", "MessageRetentionPeriod": 1209600, "SqsManagedSseEnabled": true } },
+    "Queue": { "Type": "AWS::SQS::Queue", "Properties": { "QueueName": "steyoyoke-cms-audio-validation", "VisibilityTimeout": 5400, "MessageRetentionPeriod": 345600, "SqsManagedSseEnabled": true, "RedrivePolicy": { "deadLetterTargetArn": { "Fn::GetAtt": ["DeadLetterQueue", "Arn"] }, "maxReceiveCount": 3 } } },
+    "Logs": { "Type": "AWS::Logs::LogGroup", "Properties": { "LogGroupName": "/aws/lambda/steyoyoke-cms-audio-validation", "RetentionInDays": 14 } },
+    "WorkerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "steyoyoke-cms-audio-validation-worker",
+        "AssumeRolePolicyDocument": { "Version": "2012-10-17", "Statement": [{ "Effect": "Allow", "Principal": { "Service": "lambda.amazonaws.com" }, "Action": "sts:AssumeRole" }] },
+        "Policies": [{ "PolicyName": "cms-audio-validation-only", "PolicyDocument": { "Version": "2012-10-17", "Statement": [
+          { "Effect": "Allow", "Action": ["s3:GetObject"], "Resource": "arn:aws:s3:::steyoyoke-cms-media/audio-originals/*" },
+          { "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:PutObjectAcl"], "Resource": "arn:aws:s3:::steyoyokeapp/CMSAUDIOTEST_*-high.mp3" },
+          { "Effect": "Allow", "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:ChangeMessageVisibility", "sqs:SendMessage"], "Resource": { "Fn::GetAtt": ["Queue", "Arn"] } },
+          { "Effect": "Allow", "Action": ["secretsmanager:GetSecretValue"], "Resource": { "Ref": "DatabaseSecretArn" } },
+          { "Effect": "Allow", "Action": ["logs:CreateLogStream", "logs:PutLogEvents"], "Resource": "arn:aws:logs:eu-west-1:597848491835:log-group:/aws/lambda/steyoyoke-cms-audio-validation:*" }
+        ] } }]
+      }
+    },
+    "Worker": { "Type": "AWS::Lambda::Function", "DependsOn": ["Logs"], "Properties": {
+      "FunctionName": "steyoyoke-cms-audio-validation", "PackageType": "Image", "Code": { "ImageUri": { "Ref": "ImageUri" } },
+      "Role": { "Fn::GetAtt": ["WorkerRole", "Arn"] }, "Architectures": ["x86_64"], "MemorySize": 2048, "Timeout": 900,
+      "EphemeralStorage": { "Size": 2048 }, "ReservedConcurrentExecutions": 2,
+      "Environment": { "Variables": { "CMS_AUDIO_DATABASE_SECRET_ARN": { "Ref": "DatabaseSecretArn" }, "CMS_AUDIO_QUEUE_URL": { "Ref": "Queue" }, "CMS_AUDIO_DATABASE_NAME": "steyoyoke_cms_worker_test", "CMS_AUDIO_NEON_BRANCH_ID": "br-twilight-butterfly-b13z46i6" } }
+    } },
+    "QueueMapping": { "Type": "AWS::Lambda::EventSourceMapping", "Properties": { "FunctionName": { "Ref": "Worker" }, "EventSourceArn": { "Fn::GetAtt": ["Queue", "Arn"] }, "BatchSize": 1, "FunctionResponseTypes": ["ReportBatchItemFailures"], "Enabled": true } },
+    "Reconcile": { "Type": "AWS::Events::Rule", "Properties": { "Name": "steyoyoke-cms-audio-validation-reconcile", "ScheduleExpression": "rate(1 minute)", "State": "DISABLED", "Targets": [{ "Id": "cms-audio", "Arn": { "Fn::GetAtt": ["Worker", "Arn"] }, "Input": "{\"reconcile\":true}" }] } },
+    "ReconcilePermission": { "Type": "AWS::Lambda::Permission", "Properties": { "FunctionName": { "Ref": "Worker" }, "Action": "lambda:InvokeFunction", "Principal": "events.amazonaws.com", "SourceArn": { "Fn::GetAtt": ["Reconcile", "Arn"] } } }
+  },
+  "Outputs": { "QueueUrl": { "Value": { "Ref": "Queue" } }, "DlqUrl": { "Value": { "Ref": "DeadLetterQueue" } }, "WorkerName": { "Value": { "Ref": "Worker" } } }
+}

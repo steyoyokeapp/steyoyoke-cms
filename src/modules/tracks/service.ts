@@ -23,7 +23,7 @@ function draftData(data: ReturnType<typeof trackDraftSchema.parse>) {
     durationMs: data.durationMs ?? null,
     artworkAssetId: data.artworkAssetId || null,
     audioAssetId: data.audioAssetId || null,
-    ...Object.fromEntries(urlFields.map((field) => [field, nullable(data[field])])),
+    ...Object.fromEntries(urlFields.map((field) => [field, nullable(data[field])])) as Record<typeof urlFields[number], string | null>,
   };
 }
 
@@ -96,7 +96,9 @@ export async function createTrack(actor: Actor, input: TrackDraftInput) {
     return await prisma.$transaction(async (tx) => {
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
-      const track = await tx.track.create({ data: { id: crypto.randomUUID(), ...draftData(data) } });
+      const next = draftData(data);
+      if (data.audioAssetId) next.durationMs = (await assertReadyAudio(tx, data.audioAssetId, true))!.durationMs;
+      const track = await tx.track.create({ data: { id: crypto.randomUUID(), ...next } });
       await auditMediaAttachment(tx, actor, null, track.artworkAssetId, { contentType: "TRACK", contentId: track.id });
       await auditMediaAttachment(tx, actor, null, track.audioAssetId, { contentType: "TRACK_AUDIO", contentId: track.id }, "AUDIO");
       await audit(tx, track, actor.userId, "CREATE");
@@ -118,6 +120,12 @@ export async function updateTrackDraft(actor: Actor, id: string, input: unknown)
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label || (!label.active && label.id !== track.labelId)) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const next = draftData(data);
+      if (data.soundcloudUrl === undefined) next.soundcloudUrl = track.soundcloudUrl;
+      if (data.durationMs === undefined) next.durationMs = track.durationMs;
+      if (data.audioAssetId && data.audioAssetId !== track.audioAssetId) {
+        const audio = await assertReadyAudio(tx, data.audioAssetId, true);
+        next.durationMs = audio!.durationMs;
+      }
       if (data.artworkAssetId === undefined) next.artworkAssetId = track.artworkAssetId;
       if (data.audioAssetId === undefined) next.audioAssetId = track.audioAssetId;
       const changedFields = Object.keys(next).filter((key) => String(track[key as keyof Track] ?? "") !== String(next[key as keyof typeof next] ?? ""));
@@ -206,6 +214,13 @@ export async function archiveTrack(actor: Actor, id: string) {
   requirePermission(actor, "track:write");
   return prisma.$transaction(async (tx) => {
     const track = await lockTrack(tx, id); if (track.status === TrackStatus.ARCHIVED) return track;
+    const dependencies = await tx.release.findMany({
+      where: { status: { not: "ARCHIVED" }, OR: [
+        { tracks: { some: { trackId: id } } },
+        { status: "SCHEDULED", scheduledRevision: { tracks: { some: { trackRevision: { trackId: id } } } } },
+      ] }, select: { id: true, title: true }, take: 10,
+    });
+    if (dependencies.length) throw new AppError(`Remove this Track from the working or scheduled Releases first: ${dependencies.map(r => r.title).join(", ")}.`, 409, "TRACK_RELEASE_DEPENDENCY", { releases: dependencies });
     const updated = await tx.track.update({ where: { id }, data: { status: TrackStatus.ARCHIVED, archivedAt: new Date(), scheduledRevisionId: null, scheduledFor: null } });
     await audit(tx, updated, actor.userId, "ARCHIVE", { previousStatus: track.status }); return updated;
   });
@@ -232,7 +247,7 @@ export async function getTrack(actor: Actor, id: string) {
 
 export async function listTracks(actor: Actor, input: unknown = {}) {
   requirePermission(actor, "track:read"); const filters = trackListSchema.parse(input);
-  return prisma.track.findMany({ where: { ...(filters.q ? { title: { contains: filters.q, mode: "insensitive" as const } } : {}), ...(filters.labelId ? { labelId: filters.labelId } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.artistId ? { OR: [{ primaryArtistId: filters.artistId }, { secondaryArtistId: filters.artistId }] } : {}) }, include: { primaryArtist: true, label: true, publishedRevision: { select: { sourceWorkingVersion: true } } }, orderBy: [{ updatedAt: "desc" }, { title: "asc" }] });
+  return prisma.track.findMany({ where: { ...(filters.q ? { title: { contains: filters.q, mode: "insensitive" as const } } : {}), ...(filters.labelId ? { labelId: filters.labelId } : {}), ...(filters.status ? { status: filters.status } : { status: { not: TrackStatus.ARCHIVED } }), ...(filters.artistId ? { OR: [{ primaryArtistId: filters.artistId }, { secondaryArtistId: filters.artistId }] } : {}) }, include: { primaryArtist: true, label: true, publishedRevision: { select: { sourceWorkingVersion: true } } }, orderBy: [{ updatedAt: "desc" }, { title: "asc" }] });
 }
 
 export async function getTrackFormOptions(actor: Actor, attached?: { primaryArtistId?: string; secondaryArtistId?: string | null; labelId?: string }) {

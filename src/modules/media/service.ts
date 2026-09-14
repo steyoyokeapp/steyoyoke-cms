@@ -241,6 +241,7 @@ export async function permanentlyDeleteMedia(actor: Actor, id: string, storage: 
   requirePermission(actor, "media:hard-delete");
   const asset = await prisma.mediaAsset.findUnique({ where: { id }, include: { variants: true, processingJob: true } });
   if (!asset) return { id, deleted: false, alreadyDeleted: true, deletedObjectCount: 0 };
+  if (asset.audioDelivery || asset.sourceStorageKey?.startsWith("audio-originals/")) throw new AppError("Archival Track audio is retained; permanent deletion requires a separate retention review.", 409, "AUDIO_ARCHIVAL_RETENTION");
   if (asset.status !== "RETIRED") throw new AppError("Only retired media can be permanently deleted.", 409, "MEDIA_DELETE_NOT_RETIRED");
   const references = await referenceRows(prisma, id);
   if (references.length) throw new AppError("Referenced media cannot be permanently deleted.", 409, "MEDIA_REFERENCED", { references });

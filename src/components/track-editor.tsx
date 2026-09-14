@@ -1,13 +1,8 @@
 "use client";
-
-import { useState, type FormEvent } from "react";
-import { formatDuration, parseDuration } from "@/modules/tracks/duration";
-import type { TrackOption } from "@/components/track-create-form";
-import { SecondarySections } from "./secondary-sections";
-import { SearchPicker } from "./search-picker";
-import { ArtworkPicker, type ArtworkOption } from "@/components/artwork-picker";
-import { AudioPicker, type AudioOption } from "@/components/audio-picker";
-
+import type { TrackOption } from "./track-create-form";
+import type { ArtworkOption } from "./artwork-picker";
+import type { AudioOption } from "./audio-picker";
+import { TrackForm } from "./track-form";
 type Revision = { id:string; revisionNumber:number; sourceWorkingVersion:number };
 export type TrackEditorData = {
   id: string; legacyId: number; title: string; primaryArtistId: string; secondaryArtistId: string | null; labelId: string;
@@ -16,54 +11,6 @@ export type TrackEditorData = {
   scheduledFor: string | null; publishedRevision: Revision | null; scheduledRevision: Revision | null;
 };
 
-async function result(response: Response) { const body = await response.json(); if (!response.ok) throw new Error(body.error?.message ?? "The operation failed."); return body; }
-const displayDate = (value: string) => new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
-
-export function TrackEditor({ track, role, artists, labels, mediaAssets, audioAssets }: { track: TrackEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; mediaAssets: ArtworkOption[]; audioAssets: AudioOption[] }) {
-  const canWrite = role !== "VIEWER"; const [pending, setPending] = useState(false); const [error, setError] = useState("");
-  const [title, setTitle] = useState(track.title); const [primaryArtistId, setPrimaryArtistId] = useState(track.primaryArtistId); const [secondaryArtistId, setSecondaryArtistId] = useState(track.secondaryArtistId ?? ""); const [labelId, setLabelId] = useState(track.labelId); const [duration, setDuration] = useState(formatDuration(track.durationMs) ?? ""); const [scheduledFor, setScheduledFor] = useState("");
-  const [links, setLinks] = useState({ spotifyUrl: track.spotifyUrl ?? "", beatportUrl: track.beatportUrl ?? "", traxsourceUrl: track.traxsourceUrl ?? "", bandcampUrl: track.bandcampUrl ?? "", appleMusicUrl: track.appleMusicUrl ?? "", soundcloudUrl: track.soundcloudUrl ?? "" });
-  const [artworkAssetId, setArtworkAssetId] = useState<string | null>(track.artworkAssetId);
-  const [audioAssetId, setAudioAssetId] = useState<string | null>(track.audioAssetId);
-  const unpublishedChanges = !track.publishedRevision || track.publishedRevision.sourceWorkingVersion !== track.workingVersion;
-
-  async function perform(action: string, extra: Record<string, unknown> = {}) {
-    setPending(true); setError("");
-    try { await result(await fetch(`/api/admin/tracks/${track.id}/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) })); window.location.reload(); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : "The operation failed."); setPending(false); }
-  }
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setPending(true); setError("");
-    try {
-      await result(await fetch(`/api/admin/tracks/${track.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, primaryArtistId, secondaryArtistId, labelId, durationMs: parseDuration(duration), artworkAssetId, audioAssetId, ...links, expectedWorkingVersion: track.workingVersion }) })); window.location.reload();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save draft."); setPending(false); }
-  }
-  return <div className="editor-grid">
-    <div className="editor-column">
-      <section className="panel summary-strip"><span><small>Legacy ID</small><strong className="mono">{track.legacyId}</strong></span><span><small>Status</small><i className={`status ${track.status.toLowerCase()}`}>{track.status}</i></span><span><small>Working version</small><strong className="mono">v{track.workingVersion}</strong></span><span><small>Published revision</small><strong className="mono">{track.publishedRevision ? `r${track.publishedRevision.revisionNumber}` : "—"}</strong></span></section>
-      {track.publishedRevision && <div className={`change-indicator ${unpublishedChanges ? "changed" : "synced"}`}>{unpublishedChanges ? "Unpublished changes" : "Draft matches published revision"}</div>}
-      <form className="panel editor-form" onSubmit={save}>
-        <div className="eyebrow">Core</div>
-        <label>Title<input value={title} onChange={(event) => setTitle(event.target.value)} readOnly={!canWrite} required /></label>
-        <SearchPicker kind="artist" label="Primary Artist" value={primaryArtistId} initial={artists} onChange={setPrimaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`} required/>
-        <SearchPicker kind="artist" label="Secondary Artist" value={secondaryArtistId} initial={artists} onChange={setSecondaryArtistId} disabled={!canWrite} describe={a=>`${a.name} · #${a.legacyId}`}/>
-        <label>Label<select value={labelId} onChange={(event) => setLabelId(event.target.value)} disabled={!canWrite}>{labels.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active === false ? " (inactive · attached)" : ""}</option>)}</select></label>
-        <label>Duration <span className="hint">MM:SS or HH:MM:SS</span><input value={duration} onChange={(event) => setDuration(event.target.value)} readOnly={!canWrite} placeholder="03:45" pattern="(?:[0-9]{2}:)?[0-9]{2}:[0-9]{2}" /></label>
-        <div className="eyebrow section-break">Links</div>
-        {([['spotifyUrl','Spotify'],['beatportUrl','Beatport'],['traxsourceUrl','Traxsource'],['bandcampUrl','Bandcamp'],['appleMusicUrl','Apple Music / iTunes'],['soundcloudUrl','SoundCloud']] as const).map(([key, name]) => <label key={key}>{name}<input type="url" value={links[key]} onChange={(event) => setLinks({ ...links, [key]: event.target.value })} readOnly={!canWrite} placeholder="https://" /></label>)}
-        {error && <div className="alert error" role="alert">{error}</div>}
-        {canWrite && track.status !== "ARCHIVED" && <div className="button-row"><button className="button primary" disabled={pending}>Save draft</button></div>}
-      </form>
-      <ArtworkPicker value={artworkAssetId} assets={mediaAssets} canWrite={canWrite && track.status !== "ARCHIVED"} onChange={setArtworkAssetId} />
-      <AudioPicker value={audioAssetId} assets={audioAssets} canWrite={canWrite && track.status !== "ARCHIVED"} onChange={setAudioAssetId} />
-      {canWrite && <section className="panel publish-panel"><h2>Publication</h2><p className="muted">Publishing and scheduling freeze the current draft, Artist delivery names, and Label legacy value.</p><div className="button-row wrap">
-        {track.status !== "ARCHIVED" && <button className="button" disabled={pending} onClick={() => perform("publish", { expectedWorkingVersion: track.workingVersion })}>Publish now</button>}
-        {track.status === "PUBLISHED" && <button className="button" disabled={pending} onClick={() => perform("unpublish")}>Unpublish</button>}
-        {track.status !== "ARCHIVED" && track.status !== "SCHEDULED" && <><input aria-label="Schedule time" type="datetime-local" value={scheduledFor} onInput={(event) => setScheduledFor(event.currentTarget.value)} /><button className="button" disabled={pending || !scheduledFor} onClick={() => perform("schedule", { scheduledFor: new Date(scheduledFor).toISOString(), expectedWorkingVersion: track.workingVersion })}>Schedule</button></>}
-        {track.status === "SCHEDULED" && <button className="button" disabled={pending} onClick={() => perform("cancelSchedule")}>Cancel schedule</button>}
-        {track.status === "ARCHIVED" ? <button className="button" disabled={pending} onClick={() => perform("restore")}>Restore</button> : <button className="button danger" disabled={pending} onClick={() => perform("archive")}>Archive</button>}
-      </div>{track.scheduledFor && <p className="schedule-note">Scheduled for {displayDate(track.scheduledFor)} UTC.</p>}</section>}
-    </div>
-    <SecondarySections kind="tracks" id={track.id} version={track.workingVersion} />
-  </div>;
+export function TrackEditor(props: { track: TrackEditorData; role: string; artists: TrackOption[]; labels: TrackOption[]; mediaAssets: ArtworkOption[]; audioAssets: AudioOption[] }) {
+  return <TrackForm {...props} />;
 }

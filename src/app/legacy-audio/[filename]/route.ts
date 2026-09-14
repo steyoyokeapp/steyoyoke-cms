@@ -6,6 +6,7 @@ function responseHeaders(asset: { mimeType: string; byteSize: number }) { return
 export async function GET(request: Request, context: RouteContext<"/legacy-audio/[filename]">) {
   const filename = (await context.params).filename; const match = /^([A-Za-z0-9_-]{1,200})-high\.mp3$/.exec(filename); if (!match) return new Response("Not found", { status: 404 });
   const asset = await resolveLegacyAudio(match[1]!); if (!asset) return new Response("Not found", { status: 404 });
+  if (asset.audioDelivery) return Response.redirect(`https://steyoyokeapp.s3.eu-west-1.amazonaws.com/${encodeURIComponent(match[1]!)}-high.mp3`, 307);
   if (!asset.sourceStorageKey || !asset.mimeType || asset.byteSize === null) return new Response("Not found", { status: 404 });
   try {
     const bytes = await mediaStorage.read(asset.sourceStorageKey); const baseHeaders = responseHeaders({ mimeType: asset.mimeType, byteSize: asset.byteSize }); const range = request.headers.get("range");

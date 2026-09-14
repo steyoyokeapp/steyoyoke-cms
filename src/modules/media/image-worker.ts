@@ -41,7 +41,7 @@ async function claimJob(db: WorkerDb, id: string, now: Date) {
         AND EXISTS (
           SELECT 1 FROM "media_assets"
           WHERE "media_assets".id = "media_processing_jobs"."mediaAssetId"
-            AND "media_assets".status = 'PROCESSING'
+            AND "media_assets".status = 'PROCESSING' AND "media_assets".kind = 'IMAGE'
         )
         AND ((status = 'PENDING' AND "availableAt" <= ${now}) OR (status = 'RUNNING' AND "lockedAt" <= ${staleBefore}))
       FOR UPDATE SKIP LOCKED
@@ -149,7 +149,7 @@ export async function runMediaProcessingJobs(options: { limit?: number; mediaAss
   const staleBefore = new Date(now.getTime() - MEDIA_JOB_LOCK_TIMEOUT_MS);
   const candidates = await db.mediaProcessingJob.findMany({
     where: {
-      attempts: { lt: MEDIA_JOB_MAX_ATTEMPTS }, mediaAsset: { status: "PROCESSING" }, ...(options.mediaAssetId ? { mediaAssetId: options.mediaAssetId } : {}),
+      attempts: { lt: MEDIA_JOB_MAX_ATTEMPTS }, mediaAsset: { status: "PROCESSING", kind: "IMAGE" }, ...(options.mediaAssetId ? { mediaAssetId: options.mediaAssetId } : {}),
       OR: [{ status: "PENDING", availableAt: { lte: now } }, { status: "RUNNING", lockedAt: { lte: staleBefore } }],
     },
     orderBy: [{ availableAt: "asc" }, { createdAt: "asc" }], take: limit, select: { id: true },

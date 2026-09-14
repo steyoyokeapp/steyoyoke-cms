@@ -91,7 +91,7 @@ export function TracksFilters({ filters, artists, labels }: { filters: Filters; 
         <option value="">All Labels</option>{labels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
       </select></label>
       <label className={styles.field}>Status<select name="status" defaultValue={filters.status ?? ""}>
-        <option value="">All statuses</option>{["DRAFT", "SCHEDULED", "PUBLISHED", "UNPUBLISHED", "ARCHIVED"].map(x => <option key={x}>{x}</option>)}
+        <option value="">Active statuses</option>{["DRAFT", "SCHEDULED", "PUBLISHED", "UNPUBLISHED", "ARCHIVED"].map(x => <option key={x}>{x}</option>)}
       </select></label>
       <button className={`button ${styles.submit}`} type="submit">Filter</button>
       {active && <Link className={styles.clear} href="/admin/tracks" prefetch={false}>Clear filters</Link>}

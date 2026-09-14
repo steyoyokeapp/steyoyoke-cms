@@ -1,29 +1,59 @@
-import { createPublishedArtist } from "./artist-fixtures";
-import {mutateAndReload,openPreview} from "./performance-helpers";
-import { expect, test, type Page } from "@playwright/test";
-
-async function signIn(page: Page, email: string, password: string) {
-  await page.goto("/sign-in"); await page.getByLabel("Email").fill(email); await page.getByLabel("Password").fill(password); await page.getByRole("button", { name: "Sign in" }).click(); await expect(page).toHaveURL(/\/admin\/artists$/);
-}
-
-test("Editor completes the Track draft isolation lifecycle", async ({ page }) => {
-  const suffix = Date.now(); const artistName = `Track E2E Artist ${suffix}`; const publishedTitle = `Track E2E ${suffix}`; const draftTitle = `Track E2E Draft ${suffix}`; const apiKey = process.env.LEGACY_API_KEY_A!;
-  await signIn(page, process.env.SEED_EDITOR_EMAIL!, process.env.SEED_EDITOR_PASSWORD!);
-  await createPublishedArtist(page, artistName);
-  await page.getByRole("link", { name: "Tracks", exact: true }).click(); await page.getByRole("link", { name: "Create Track" }).click();
-  await page.getByLabel("Title").fill(publishedTitle); await page.getByLabel("Search Primary Artist").fill(artistName); await page.getByLabel("Primary Artist", {exact:true}).selectOption({ index: 1 }); await page.getByLabel("Label").selectOption({ label: "Steyoyoke" }); await page.getByLabel("Duration").fill("03:45"); await page.getByRole("button", { name: "Create draft" }).click();
-  await expect(page).toHaveURL(/\/admin\/tracks\/[0-9a-f-]+(?:\?.*)?$/); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toHaveText("null"); const legacyId = await page.locator(".summary-strip .mono").first().textContent();
-  let api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=track`, { headers: { "X-Csrf-Token": apiKey } }); expect((await api.json()).tracks).toEqual([]);
-  await mutateAndReload(page,"Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(publishedTitle);
-  api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=track`, { headers: { "X-Csrf-Token": apiKey } }); expect((await api.json()).tracks[0].title).toBe(publishedTitle);
-  await page.getByLabel("Title").fill(draftTitle); await mutateAndReload(page,"Save draft"); await expect(page.getByText("Unpublished changes")).toBeVisible(); await openPreview(page); await expect(page.getByTestId("canonical-preview")).toContainText(draftTitle); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(publishedTitle);
-  api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=track`, { headers: { "X-Csrf-Token": apiKey } }); expect((await api.json()).tracks[0].title).toBe(publishedTitle);
-  await mutateAndReload(page,"Publish now"); await openPreview(page); await expect(page.getByTestId("legacy-preview")).toContainText(draftTitle); api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=track`, { headers: { "X-Csrf-Token": apiKey } }); expect((await api.json()).tracks[0].title).toBe(draftTitle);
-  await page.getByRole("button", { name: "Unpublish" }).click(); await expect(page.locator(".summary-strip")).toContainText("UNPUBLISHED"); api = await page.request.get(`/index.php/cms/api/${legacyId}?filter=tracks&type=track`, { headers: { "X-Csrf-Token": apiKey } }); expect((await api.json()).tracks).toEqual([]);
+import { test, expect, type Page } from '@playwright/test';
+const prefix = `Track workflow ${Date.now()}`;
+let artist: { id: string; name: string }; let secondary: { id: string; name: string }; let labelId: string;
+test.beforeAll(async () => {
+  const url = new URL(process.env.DATABASE_URL!); if(url.hostname !== '127.0.0.1' || url.pathname !== '/steyoyoke_cms_local') throw new Error('Local only');
+  const { prisma } = await import('../../src/lib/prisma');
+  const { createArtist, publishArtist } = await import('../../src/modules/artists/service');
+  const user=await prisma.user.findFirstOrThrow({where:{role:'ADMIN'}});
+  const actor={userId:user.id,role:'ADMIN' as const};
+  artist=await createArtist(actor,{name:prefix+' Artist'}); await publishArtist(actor,artist.id,{expectedWorkingVersion:1});
+  secondary=await createArtist(actor,{name:prefix+' Secondary'}); await publishArtist(actor,secondary.id,{expectedWorkingVersion:1});
+  labelId=(await prisma.label.findFirstOrThrow({where:{active:true}})).id;
+  await prisma.$disconnect();
 });
-
-test("Viewer sees Track details without mutation controls or server write access", async ({ page }) => {
-  await signIn(page, process.env.SEED_VIEWER_EMAIL!, process.env.SEED_VIEWER_PASSWORD!); await page.getByRole("link", { name: "Tracks", exact: true }).click();
-  await expect(page.getByRole("link", { name: "Create Track" })).toHaveCount(0); const row = page.locator("a.table-row").first(); await expect(row).toBeVisible(); await row.click(); await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0); await expect(page.getByRole("button", { name: "Publish now" })).toHaveCount(0);
-  const denied = await page.request.patch(`/api/admin/tracks/${new URL(page.url()).pathname.split("/").at(-1)}`, { data: {} }); expect(denied.status()).toBe(403);
+async function login(page:Page) {
+  await page.goto('/sign-in'); await page.getByLabel('Email').fill(process.env.SEED_ADMIN_EMAIL!); await page.getByLabel('Password').fill(process.env.SEED_ADMIN_PASSWORD!);
+  await page.getByRole('button',{name:'Sign in',exact:true}).click(); await expect(page).toHaveURL(/\/admin\/artists$/);
+}
+test('simple Track create, bounded Artist selection, edit and operational delete',async({page})=>{
+  await login(page); await page.goto('/admin/tracks/new');
+  for(const text of ['SoundCloud','Revision History','Audit Trail','Compatibility JSON']) await expect(page.getByText(text,{exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Create track',exact:true})).toBeVisible();
+  await expect(page.locator('input[name="duration"]')).toHaveCount(0);
+  await page.getByLabel('Title',{exact:true}).fill(prefix);
+  const combo=page.getByRole('combobox',{name:'Primary Artist',exact:true}); await combo.fill(prefix);
+  await page.getByRole('option',{name:artist.name,exact:true}).click();
+  await page.getByRole('combobox',{name:'Secondary Artist',exact:true}).fill(secondary.name);
+  await page.getByRole('option',{name:secondary.name,exact:true}).click();
+  await page.getByLabel('Label',{exact:true}).selectOption(labelId);
+  await page.getByLabel('Spotify',{exact:true}).fill('https://example.com/manual');
+  await page.locator('input[type="file"]').nth(1).setInputFiles({name:prefix.replaceAll(' ','-')+'.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});
+  await expect(page.getByRole('status',{name:'artwork processing status'})).toHaveText('READY',{timeout:20000});
+  await expect(page.getByAltText('Track artwork')).toBeVisible();
+  await page.getByRole('button',{name:'Create track',exact:true}).click();
+  await expect(page).toHaveURL(/\/admin\/tracks\/[0-9a-f-]+$/);
+  await expect(page.getByRole('combobox',{name:'Secondary Artist',exact:true})).toHaveValue(secondary.name);
+  await expect(page.getByAltText('Track artwork')).toBeVisible();
+  await page.getByLabel('Title',{exact:true}).fill(prefix+' edited');
+  await page.getByRole('button',{name:'Save changes',exact:true}).click();
+  await expect(page.getByLabel('Title',{exact:true})).toHaveValue(prefix+' edited');
+  await expect(page.getByLabel('Spotify',{exact:true})).toHaveValue('https://example.com/manual');
+  await page.getByRole('button',{name:'Delete track',exact:true}).click();
+  await expect(page.getByRole('dialog')).toBeVisible(); await page.getByRole('button',{name:'Confirm delete',exact:true}).click();
+  await expect(page).toHaveURL(/\/admin\/tracks$/); await expect(page.getByText(prefix+' edited',{exact:true})).toHaveCount(0);
+});
+test('new audio fills only untouched stores and processing stops at READY',async({page})=>{
+  await login(page); await page.goto('/admin/tracks/new');
+  await page.getByLabel('Spotify',{exact:true}).fill('https://example.com/manual');
+  await page.route('**/api/admin/tracks/audio',route=>route.fulfill({json:{id:'test-audio',url:'https://upload.test/source',headers:{}}}));
+  await page.route('https://upload.test/source',route=>route.fulfill({status:200,body:''}));
+  await page.route('**/api/admin/tracks/audio/test-audio',route=>route.fulfill({json:{id:'test-audio',status:'READY',originalFilename:'SYYK302_10.wav',legacyAudioId:'SYYK302_10',durationMs:381000}}));
+  await page.locator('input[type="file"]').first().setInputFiles({name:'SYYK302_10.wav',mimeType:'audio/wav',buffer:Buffer.from('UI fixture; worker bytes validated separately')});
+  await expect(page.getByRole('status',{name:'audio processing status'})).toHaveText('READY');
+  await expect(page.getByLabel('Spotify',{exact:true})).toHaveValue('https://example.com/manual');
+  await expect(page.getByLabel('Apple Music',{exact:true})).toHaveValue('https://syykrec.com/syyk302/applemusic');
+  await expect(page.getByText('Duration: 06:21',{exact:true})).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

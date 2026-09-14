@@ -669,6 +669,7 @@ model MediaAsset {
   kind                   MediaKind                @default(IMAGE)
   status                 MediaStatus              @default(UPLOADING)
   provider               MediaProvider            @default(LOCAL)
+  audioDelivery          Json?
   sourceStorageKey       String?                  @unique
   compatibilityFilename  String?                  @unique
   legacyAudioId          String?                  @unique

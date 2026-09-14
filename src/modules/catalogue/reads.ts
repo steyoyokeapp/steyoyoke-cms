@@ -56,7 +56,7 @@ export async function cataloguePage(
       : {}),
   };
   const where = {
-    ...(f.status ? { status: f.status } : {}),
+    ...(f.status ? { status: f.status } : kind === "tracks" ? { status: { not: "ARCHIVED" as const } } : {}),
     ...(f.labelId ? { labelId: f.labelId } : {}),
     ...(f.q ? { title: { contains: f.q, mode: "insensitive" as const } } : {}),
     ...(f.artistId

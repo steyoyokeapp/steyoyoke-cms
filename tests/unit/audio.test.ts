@@ -5,7 +5,7 @@ import { formatAudioDuration } from "@/modules/media/format";
 import { LegacyAudioSerializer } from "@/modules/media/legacy";
 import { testMp3 } from "@/../tests/fixtures/audio";
 
-const asset = { id: crypto.randomUUID(), kind: "AUDIO", status: "READY", provider: "LOCAL", sourceStorageKey: `audio/${crypto.randomUUID()}/source.mp3`, compatibilityFilename: null, legacyAudioId: "historical_key-17", originalFilename: "episode.mp3", mimeType: "audio/mpeg", byteSize: 100, sha256Checksum: "a".repeat(64), width: null, height: null, durationMs: 1234, createdById: crypto.randomUUID(), failureReason: null, unreferencedAt: null, retiredAt: null, createdAt: new Date(), updatedAt: new Date() } satisfies MediaAsset;
+const asset = { id: crypto.randomUUID(), kind: "AUDIO", status: "READY", provider: "LOCAL", audioDelivery: null, sourceStorageKey: `audio/${crypto.randomUUID()}/source.mp3`, compatibilityFilename: null, legacyAudioId: "historical_key-17", originalFilename: "episode.mp3", mimeType: "audio/mpeg", byteSize: 100, sha256Checksum: "a".repeat(64), width: null, height: null, durationMs: 1234, createdById: crypto.randomUUID(), failureReason: null, unreferencedAt: null, retiredAt: null, createdAt: new Date(), updatedAt: new Date() } satisfies MediaAsset;
 
 describe("local audio contract", () => {
   it("validates actual MP3 bytes and extracts stable metadata", async () => { const result = await processAudio(testMp3()); expect(result).toMatchObject({ mimeType: "audio/mpeg", extension: "mp3", durationMs: 287 }); expect(result.sha256Checksum).toMatch(/^[a-f0-9]{64}$/); });

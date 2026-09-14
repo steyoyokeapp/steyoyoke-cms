@@ -41,6 +41,7 @@ function assertVersion(release: Release, expected: number) {
 }
 
 async function publicationDependencies(tx: Tx, release: Release) {
+  await tx.$queryRaw`SELECT t.id FROM tracks t JOIN release_tracks rt ON rt."trackId"=t.id WHERE rt."releaseId"=${release.id}::uuid ORDER BY t.id FOR SHARE OF t`;
   const [primary, secondary, label, publishedRevision, memberships] = await Promise.all([
     tx.artist.findUnique({ where: { id: release.primaryArtistId }, include: { publishedRevision: true } }),
     release.secondaryArtistId ? tx.artist.findUnique({ where: { id: release.secondaryArtistId }, include: { publishedRevision: true } }) : null,
@@ -126,7 +127,13 @@ async function replaceTracks(actor: Actor, id: string, input: unknown, action: "
     const release = await lockRelease(tx, id); assertEditable(release); assertVersion(release, parsed.expectedWorkingVersion);
     const previous = await tx.releaseTrack.findMany({ where: { releaseId: id }, orderBy: { position: "asc" } });
     if (action === "REORDER" && (previous.length !== parsed.trackIds.length || previous.some(({ trackId }) => !parsed.trackIds.includes(trackId)))) throw new AppError("Reordering must retain the current Track membership.", 422, "REORDER_MEMBERSHIP_CHANGED");
-    const found = await tx.track.findMany({ where: { id: { in: parsed.trackIds } }, select: { id: true } });
+    // SHARE locks coordinate membership changes with Track archive's UPDATE lock.
+    const found = parsed.trackIds.length ? await tx.$queryRaw<Array<{ id: string; status: string }>>`
+      SELECT id, status FROM tracks WHERE id IN (${Prisma.join(parsed.trackIds.map(id => Prisma.sql`${id}::uuid`))}) ORDER BY id FOR SHARE
+    ` : [];
+    if (found.some(track => track.status === "ARCHIVED" && !previous.some(member => member.trackId === track.id))) {
+      throw new AppError("Deleted Tracks cannot be added to Releases.", 409, "TRACK_ARCHIVED");
+    }
     if (found.length !== parsed.trackIds.length) throw new AppError("One or more selected Tracks do not exist.", 422, "TRACK_NOT_FOUND");
     await tx.releaseTrack.deleteMany({ where: { releaseId: id } });
     if (parsed.trackIds.length) await tx.releaseTrack.createMany({ data: parsed.trackIds.map((trackId, position) => ({ id: crypto.randomUUID(), releaseId: id, trackId, position })) });

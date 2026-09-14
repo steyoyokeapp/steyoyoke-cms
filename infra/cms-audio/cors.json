@@ -1,0 +1,13 @@
+{
+  "CORSRules": [{
+    "AllowedOrigins": [
+      "https://steyoyoke-cms.vercel.app",
+      "https://steyoyoke-cms-fra1-test.vercel.app",
+      "http://localhost:3001"
+    ],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type", "if-none-match", "x-amz-checksum-sha256", "x-amz-meta-media-asset-id"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 600
+  }]
+}

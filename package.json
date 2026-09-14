@@ -40,6 +40,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1130.0",
+    "@aws-sdk/client-secrets-manager": "^3.1130.0",
+    "@aws-sdk/client-sqs": "^3.1130.0",
+    "@aws-sdk/s3-request-presigner": "^3.1130.0",
     "@better-auth/prisma-adapter": "^1.7.3",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
