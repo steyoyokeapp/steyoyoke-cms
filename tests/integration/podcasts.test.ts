@@ -96,3 +96,29 @@ describe("legacy iOS Podcast Artist filter", () => {
     expect((await legacyCollectionGET(request("track"))).status).toBe(200);
   });
 });
+
+describe("atomic Podcast core and chapter save", () => {
+  it("updates core and ordered chapters once without altering a published snapshot", async () => {
+    const primary = await artist(); const ep = await podcast(primary.id); await publishPodcast(editor, ep.id, { expectedWorkingVersion: 1 });
+    const saved = await updatePodcastDraft(editor, ep.id, { title: "Atomic update", primaryArtistId: primary.id, labelId, episodeDate: "2026-08-09", expectedWorkingVersion: 1, chapters: chapterInput });
+    expect(saved.workingVersion).toBe(2);
+    expect((await prisma.podcastChapter.findMany({ where: { episodeId: ep.id }, orderBy: { position: "asc" } })).map(c=>c.title)).toEqual(["First", "Second"]);
+    expect((await getPublishedPodcastForLegacy(ep.legacyId))?.publishedRevision?.title).toBe("Steyoyoke Episode");
+    expect((await getPublishedPodcastForLegacy(ep.legacyId))?.publishedRevision?.chapters).toEqual([]);
+  });
+  it("rolls back core and chapters on a database failure after updates", async () => {
+    const primary = await artist(); const ep = await podcast(primary.id); await replacePodcastChapters(editor, ep.id, { expectedWorkingVersion: 1, chapters: chapterInput });
+    const before = await prisma.podcastChapter.findMany({ where: { episodeId: ep.id }, orderBy: { position: "asc" } });
+    await expect(updatePodcastDraft({ role: "EDITOR", userId: crypto.randomUUID() }, ep.id, { title: "Must roll back", primaryArtistId: primary.id, labelId, expectedWorkingVersion: 2, chapters: [] })).rejects.toThrow();
+    const after = await prisma.podcastEpisode.findUniqueOrThrow({ where: { id: ep.id } });
+    expect(after.title).toBe(ep.title); expect(after.workingVersion).toBe(2);
+    expect(await prisma.podcastChapter.findMany({ where: { episodeId: ep.id }, orderBy: { position: "asc" } })).toEqual(before);
+  });
+  it("rejects invalid chapters and stale saves without mutating core", async () => {
+    const primary = await artist(); const ep = await podcast(primary.id);
+    const data = { title: "Must not save", primaryArtistId: primary.id, labelId, expectedWorkingVersion: 1 };
+    await expect(updatePodcastDraft(editor, ep.id, { ...data, chapters: [{ artist: "", title: "Invalid" }] })).rejects.toThrow();
+    await expect(updatePodcastDraft(editor, ep.id, { ...data, expectedWorkingVersion: 2, chapters: [] })).rejects.toMatchObject({ code: "WORKING_VERSION_CONFLICT" });
+    expect((await prisma.podcastEpisode.findUniqueOrThrow({ where: { id: ep.id } })).title).toBe(ep.title);
+  });
+});

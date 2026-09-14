@@ -18,7 +18,6 @@ export const podcastDraftSchema = z.object({
   }
 });
 
-export const updatePodcastSchema = podcastDraftSchema.and(z.object({ expectedWorkingVersion: z.number().int().positive() }));
 export const publishPodcastSchema = z.object({ expectedWorkingVersion: z.number().int().positive() });
 export const schedulePodcastSchema = publishPodcastSchema.extend({ scheduledFor: z.coerce.date() });
 export const podcastListSchema = z.object({
@@ -33,6 +32,8 @@ export const podcastChapterSchema = z.object({
   legacyReference: z.string().trim().max(255).nullable().optional(),
   durationMs: z.number().int().nonnegative().nullable().optional(),
 });
+
+export const updatePodcastSchema = podcastDraftSchema.and(z.object({ expectedWorkingVersion: z.number().int().positive(), chapters: z.array(podcastChapterSchema).max(500).optional() }));
 
 export const replacePodcastChaptersSchema = z.object({
   expectedWorkingVersion: z.number().int().positive(), chapters: z.array(podcastChapterSchema).max(500),

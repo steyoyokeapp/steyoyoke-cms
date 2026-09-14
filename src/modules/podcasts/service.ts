@@ -102,6 +102,13 @@ export async function updatePodcastDraft(actor: Actor, id: string, input: unknow
       const updated = await tx.podcastEpisode.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
       await auditMediaAttachment(tx, actor, episode.artworkAssetId, updated.artworkAssetId, { contentType: "PODCAST", contentId: id });
       await auditMediaAttachment(tx, actor, episode.audioAssetId, updated.audioAssetId, { contentType: "PODCAST_AUDIO", contentId: id }, "AUDIO");
+      if (data.chapters !== undefined) {
+        const chapters = normalizePodcastChapters(data.chapters);
+        const previous = await tx.podcastChapter.findMany({ where: { episodeId: id }, orderBy: { position: "asc" } });
+        await tx.podcastChapter.deleteMany({ where: { episodeId: id } });
+        if (chapters.length) await tx.podcastChapter.createMany({ data: chapters.map(chapter => ({ id: crypto.randomUUID(), episodeId: id, ...chapter })) });
+        await audit(tx, updated, actor.userId, "CHAPTERS_EDIT", { previousCount: previous.length, chapterCount: chapters.length, atomicSave: true });
+      }
       await audit(tx, updated, actor.userId, "EDIT", { changedFields, fromWorkingVersion: episode.workingVersion, toWorkingVersion: updated.workingVersion }); return updated;
     });
   } catch (error) {
