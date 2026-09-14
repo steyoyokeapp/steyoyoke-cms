@@ -231,3 +231,14 @@ export async function listPublishedPodcastsForLegacy(limit?: number, offset = 0)
 export async function getPublishedPodcastForLegacy(legacyId: number) {
   return prisma.podcastEpisode.findFirst({ where: { ...publishedWhere, legacyId }, include: { publishedRevision: { include: { artworkAsset: true, audioAsset: true, chapters: { orderBy: { position: "asc" } } } } } });
 }
+
+/** Distinct names for the legacy iOS filter; use visible frozen Podcast metadata. */
+export async function listPublishedPodcastArtistNames() {
+  return prisma.$queryRaw<Array<{ artist_name: string }>>`
+    SELECT DISTINCT r."primaryArtistName" AS artist_name
+    FROM podcast_episodes p
+    JOIN podcast_episode_revisions r ON r.id = p."publishedRevisionId" AND r."episodeId" = p.id
+    WHERE p.status IN ('PUBLISHED', 'SCHEDULED')
+    ORDER BY artist_name ASC
+  `;
+}

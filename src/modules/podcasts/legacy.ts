@@ -1,7 +1,7 @@
 import type { MediaAsset, PodcastChapterRevision, PodcastEpisodeRevision } from "@/generated/prisma/client";
 import { isLegacyAuthorized, legacyUnauthorized } from "@/modules/artists/legacy";
 import { formatLegacyDuration } from "@/modules/tracks/duration";
-import { getPublishedPodcastForLegacy, listPublishedPodcastsForLegacy } from "@/modules/podcasts/service";
+import { getPublishedPodcastForLegacy, listPublishedPodcastsForLegacy, listPublishedPodcastArtistNames } from "@/modules/podcasts/service";
 import { LegacyAudioSerializer, LegacyMediaSerializer } from "@/modules/media/legacy";
 
 export function legacyPodcastTitle(title: string) {
@@ -59,4 +59,9 @@ export async function handleLegacyPodcastRequest(request: Request, legacyId?: nu
     const limit = paginationValue(params.get("limit"), 50, "limit"); const offset = paginationValue(params.get("offset"), 0, "offset"); const result = await listPublishedPodcastsForLegacy(limit, offset);
     return Response.json(envelope(result.episodes, { total: result.total, limit: String(limit), offset: String(offset) }), { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid pagination." }, { status: 400 }); }
+}
+
+export async function handleLegacyPodcastArtistsRequest(request: Request) {
+  if (!isLegacyAuthorized(request)) return legacyUnauthorized();
+  return Response.json({ allpodcastartist: await listPublishedPodcastArtistNames() }, { headers: { "Cache-Control": "private, no-store" } });
 }

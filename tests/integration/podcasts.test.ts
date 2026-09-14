@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Actor } from "@/lib/authorization";
 import { prisma } from "@/lib/prisma";
 import { archiveArtist, createArtist, publishArtist } from "@/modules/artists/service";
+import { GET as legacyCollectionGET } from "@/app/index.php/cms/api/route";
 import { handleLegacyPodcastRequest } from "@/modules/podcasts/legacy";
 import { archivePodcast, cancelPodcastSchedule, createPodcast, getPodcast, getPublishedPodcastForLegacy, publishPodcast, replacePodcastChapters, restorePodcast, runScheduledPodcastPublication, schedulePodcast, unpublishPodcast, updatePodcastDraft } from "@/modules/podcasts/service";
 import { createTrack, publishTrack } from "@/modules/tracks/service";
@@ -70,5 +71,28 @@ describe("Podcast publication service", () => {
     const primary = await artist("API Artist"); const track = await createTrack(editor, { title: "Normal Track", primaryArtistId: primary.id, labelId }); await publishTrack(editor, track.id, { expectedWorkingVersion: 1 }); const episode = await podcast(primary.id); await replacePodcastChapters(editor, episode.id, { expectedWorkingVersion: 1, chapters: chapterInput }); await publishPodcast(editor, episode.id, { expectedWorkingVersion: 2 });
     const body = await (await handleLegacyPodcastRequest(request("podcast", undefined, "&limit=1&offset=0"))).json(); expect(body).toMatchObject({ total_rows: 1, limit: "1", offset: "0" }); expect(body.tracks[0]).toMatchObject({ id: String(episode.legacyId), title: "Episode", label: "STEYOYOKE BLACK", date: "2026-08-09", artist_feature_times: [{ duration: "00:03:45", title: "First", id: "REF-1", artist: "Artist One" }, { duration: null, title: "Second", id: "", artist: "Artist Two" }] });
     expect((await (await handleLegacyPodcastRequest(request("podcast", track.legacyId), track.legacyId)).json()).tracks).toEqual([]); expect((await (await handleLegacyTrackRequest(request("track", episode.legacyId), episode.legacyId)).json()).tracks).toEqual([]);
+  });
+});
+
+describe("legacy iOS Podcast Artist filter", () => {
+  const artistsRequest = (authorized = true) => new Request("http://local/index.php/cms/api?filter=allpodcastartist", { headers: authorized ? { "X-Csrf-Token": process.env.LEGACY_API_KEY_A! } : {} });
+  it("requires authorization and returns the exact empty envelope", async () => {
+    expect((await legacyCollectionGET(artistsRequest(false))).status).toBe(401);
+    const response = await legacyCollectionGET(artistsRequest());
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await response.json()).toEqual({ allpodcastartist: [] });
+  });
+  it("sorts and deduplicates visible frozen names, excluding nonpublic episodes and unrelated Artists", async () => {
+    const z = await artist("Zeta"); const a = await artist("Alpha"); const hidden = await artist("Hidden"); await artist("Unused");
+    for (const id of [z.id, a.id, a.id]) { const ep = await podcast(id); await publishPodcast(editor, ep.id, { expectedWorkingVersion: 1 }); }
+    const draft = await podcast(hidden.id);
+    await schedulePodcast(editor, draft.id, { expectedWorkingVersion: 1, scheduledFor: new Date(Date.now()+3600000) });
+    const archived = await podcast(hidden.id); await publishPodcast(editor, archived.id, { expectedWorkingVersion: 1 }); await archivePodcast(editor, archived.id);
+    const unpublished = await podcast(hidden.id); await publishPodcast(editor, unpublished.id, { expectedWorkingVersion: 1 }); await unpublishPodcast(editor, unpublished.id);
+    await prisma.artist.update({ where: { id: a.id }, data: { name: "Working rename" } });
+    expect(await (await legacyCollectionGET(artistsRequest())).json()).toEqual({ allpodcastartist: [{ artist_name: "Alpha" }, { artist_name: "Zeta" }] });
+    expect((await legacyCollectionGET(request("podcast"))).status).toBe(200);
+    expect((await legacyCollectionGET(request("track"))).status).toBe(200);
   });
 });
