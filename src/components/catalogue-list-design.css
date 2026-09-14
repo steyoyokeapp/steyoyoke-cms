@@ -1,0 +1,40 @@
+.cms-list-design .page-heading { min-height: 0; align-items: center; padding: 0 0 28px; gap: 20px; flex-wrap: wrap; }
+.cms-list-design .page-heading h1 { font-size: clamp(2rem, 4vw, 3rem); line-height: 1.1; }
+.cms-list-design .page-heading .eyebrow { margin-bottom: 10px; }
+.cms-list-design form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 20px; border-radius: 16px; box-shadow: none; border-color: #e3e0d9; background: #fffefa; margin-bottom: 20px; }
+.cms-list-design form input:not([type=hidden]), .cms-list-design form select { height: 46px; padding: 0 14px; font-size: .85rem; }
+.cms-list-design form select { padding-right: 38px; }
+.cms-list-design form button[type=submit] { min-height: 46px; }
+.cms-list-design form:has(a[href]) { border-color: #b8beac; }
+.cms-list-design .cms-pagination { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin: 0 0 16px; font-size: .8rem; color: #65665d; }
+.cms-list-design .cms-pagination a { padding: 12px 16px; border: 1px solid #dcdad4; background: #fffefa; border-radius: 10px; color: #34352f; }
+.cms-list-design .cms-pagination a:hover { background: #ecefe6; }
+.cms-list-design .table-panel { border-radius: 16px; box-shadow: none; border-color: #e3e0d9; background: #fffefa; }
+.cms-list-design .table-row { padding: 18px 20px; gap: 16px; border-color: #ece9e2; font-size: .8rem; line-height: 1.5; }
+.cms-list-design .table-row > span { min-width: 0; overflow-wrap: anywhere; }
+.cms-list-design .table-row strong { font-size: .9rem; font-weight: 600; }
+.cms-list-design a.table-row:hover { background: #f0f2e9; }
+.cms-list-design a:focus-visible { outline: 3px solid #757c6870; outline-offset: -3px; border-radius: 10px; }
+.cms-list-design .table-head { background: #f7f6f1; color: #76756d; font-size: .62rem; font-weight: 600; letter-spacing: .06em; min-height: 46px; padding-top: 12px; padding-bottom: 12px; }
+.cms-list-design .status { border-radius: 7px; padding: 5px 8px; font-size: .62rem; letter-spacing: .035em; font-style: normal; background: #efeee8; color: #66665d; }
+.cms-list-design .status.published, .cms-list-design .status.ready { background: #e8efe1; color: #4a603a; }
+.cms-list-design .status.scheduled, .cms-list-design .status.processing { background: #f4eddc; color: #7e642d; }
+.cms-list-design .status.archived { background: #eee6e3; color: #795e56; }
+.cms-list-design .empty { padding: 48px 24px; color: #706e67; font-size: .9rem; }
+.cms-list-design .editor-skeleton { padding: 28px; border-radius: 16px; box-shadow: none; }
+@media (max-width: 1100px) {
+ .cms-list-design .table-head { display: none; }
+ .cms-list-design a.table-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+ .cms-list-design a.table-row > span { display: flex; flex-direction: column; gap: 4px; }
+ .cms-list-design a.table-row > span:first-child { grid-column: 1 / -1; }
+ .cms-list-design [data-label]::before { content: attr(data-label); font-size: .65rem; color: #85837b; }
+}
+@media (max-width: 650px) {
+ .cms-list-design a.table-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ .cms-list-design .page-heading .button { width: 100%; }
+ .cms-list-design form { padding: 16px; }
+ .cms-list-design form > * { min-width: 0; }
+ .cms-list-design form input, .cms-list-design form select { max-width: 100%; }
+}
+/* Replace legacy horizontally scrolling minimum widths on catalogue pages. */
+.cms-list-design .table-row { min-width: 0; }

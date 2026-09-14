@@ -81,20 +81,20 @@ function ArtistFilter({ initial }: { initial?: Artist }) {
   );
 }
 
-export function TracksFilters({ filters, artists, labels }: { filters: Filters; artists: Artist[]; labels: { id: string; name: string }[] }) {
+export function TracksFilters({ filters, artists, labels, kind = "tracks" }: { kind?: string; filters: Filters; artists: Artist[]; labels: { id: string; name: string }[] }) {
   const active = Boolean(filters.q || filters.artistId || filters.labelId || filters.status);
   return (
-    <form action="/admin/tracks" method="get" aria-label="Track filters" className={`panel ${styles.toolbar}`}>
-      <label className={`${styles.field} ${styles.title}`}>Search title<input name="q" defaultValue={filters.q} placeholder="Search title" /></label>
-      <ArtistFilter initial={artists.find(x => x.id === filters.artistId)} />
+    <form action={`/admin/${kind}`} method="get" aria-label={`${kind} filters`} className={`panel ${styles.toolbar}`}>
+      <label className={`${styles.field} ${styles.title}`}>{kind === "artists" ? "Search name" : "Search title"}<input name="q" defaultValue={filters.q} placeholder={kind === "artists" ? "Search name" : "Search title"} /></label>
+      {kind !== "artists" && <><ArtistFilter initial={artists.find(x => x.id === filters.artistId)} />
       <label className={styles.field}>Label<select name="labelId" defaultValue={filters.labelId ?? ""}>
         <option value="">All Labels</option>{labels.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-      </select></label>
+      </select></label></>}
       <label className={styles.field}>Status<select name="status" defaultValue={filters.status ?? ""}>
-        <option value="">Active statuses</option>{["DRAFT", "SCHEDULED", "PUBLISHED", "UNPUBLISHED", "ARCHIVED"].map(x => <option key={x}>{x}</option>)}
+        <option value="">{kind === "tracks" ? "Active statuses" : "All statuses"}</option>{["DRAFT", "SCHEDULED", "PUBLISHED", "UNPUBLISHED", "ARCHIVED"].map(x => <option key={x}>{x}</option>)}
       </select></label>
       <button className={`button ${styles.submit}`} type="submit">Filter</button>
-      {active && <Link className={styles.clear} href="/admin/tracks" prefetch={false}>Clear filters</Link>}
+      {active && <Link className={styles.clear} href={`/admin/${kind}`} prefetch={false}>Clear filters</Link>}
     </form>
   );
 }

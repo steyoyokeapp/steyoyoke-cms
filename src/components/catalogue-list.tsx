@@ -12,7 +12,8 @@ import {
 import { formatCmsDate } from "@/lib/date";
 import { formatDuration } from "@/modules/tracks/duration";
 import { TracksFilters } from "./tracks-filters";
-import { CatalogueFilters } from "./catalogue-filters";
+import "./cms-form-design.css";
+import "./catalogue-list-design.css";
 import { IntentLink } from "./intent-link";
 export async function CatalogueList({
   kind,
@@ -43,18 +44,18 @@ export async function CatalogueList({
     q.set("page", String(page));
     return `${base}?${q}`;
   }
-  const FilterComponent = kind === "tracks" ? TracksFilters : CatalogueFilters;
+  const FilterComponent = TracksFilters;
   const content = (
-    <>
+    <div className="cms-form-design cms-list-design">
       <section className="page-heading">
         <div>
           <div className="eyebrow">Content</div>
           <h1>{title}</h1>
-          <p className="muted">Working drafts and frozen delivery revisions.</p>
+          <p className="muted">Browse and manage your catalogue.</p>
         </div>
         {actor.role !== "VIEWER" && (
           <Link className="button primary" href={`${base}/new`}>
-            {kind === "artists" ? "New artist" : `Create ${singular}`}
+            {`Create ${singular}`}
           </Link>
         )}
       </section>
@@ -65,7 +66,7 @@ export async function CatalogueList({
         artists={options.artists}
         labels={options.labels}
       />
-      <nav aria-label="Catalogue pagination" className="panel filter-bar">
+      <nav aria-label="Catalogue pagination" className="cms-pagination">
         {data.page > 1 && (
           <IntentLink href={pageUrl(data.page - 1)}>Previous</IntentLink>
         )}
@@ -111,26 +112,26 @@ export async function CatalogueList({
             </span>
             {"primaryArtist" in row && (
               <>
-                <span>{row.primaryArtist.name}</span>
+                <span data-label="Artist">{row.primaryArtist.name}</span>
                 {"episodeDate" in row && (
-                  <span>
+                  <span data-label="Date">
                     {row.episodeDate?.toISOString().slice(0, 10) ?? "—"}
                   </span>
                 )}
                 {"releaseDate" in row && (
-                  <span>
+                  <span data-label="Date">
                     {row.releaseDate?.toISOString().slice(0, 10) ?? "—"}
                   </span>
                 )}
-                <span>{row.label.name}</span>
+                <span data-label="Label">{row.label.name}</span>
               </>
             )}
-            <span>{row.legacyId}</span>
+            <span data-label="Legacy ID">{row.legacyId}</span>
             {"durationMs" in row && (
-              <span>{formatDuration(row.durationMs) ?? "—"}</span>
+              <span data-label="Duration">{formatDuration(row.durationMs) ?? "—"}</span>
             )}
             {"_count" in row && (
-              <span>
+              <span data-label={kind === "podcasts" ? "Chapters" : "Tracks"}>
                 {"chapters" in row._count
                   ? row._count.chapters
                   : row._count.tracks}
@@ -141,7 +142,7 @@ export async function CatalogueList({
                 {row.status}
               </i>
             </span>
-            <span>
+            <span data-label={kind === "artists" ? "Version" : "Unpublished changes"}>
               {"publishedRevision" in row
                 ? !row.publishedRevision ||
                   row.publishedRevision.sourceWorkingVersion !==
@@ -150,12 +151,12 @@ export async function CatalogueList({
                   : "No"
                 : `v${row.workingVersion}`}
             </span>
-            <span>{formatCmsDate(row.updatedAt)}</span>
+            <span data-label="Updated">{formatCmsDate(row.updatedAt)}</span>
           </IntentLink>
         ))}
       </section>
       {process.env.CMS_REVEAL_TIMING === "1" && (kind === "artists" || kind === "podcasts") && <RevealProbe kind={kind} />}
-    </>
+    </div>
   );
   timing.mark("constructedMs");
   timing.finish();
