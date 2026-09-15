@@ -14,6 +14,7 @@ export const podcastChapterSchema = z.object({
 
 
 export const podcastDraftSchema = z.object({
+  tracklist: z.string().max(300000).optional(),
   chapters: z.array(podcastChapterSchema).max(500).optional(),
   title: z.string().trim().min(1, "Title is required.").max(255),
   primaryArtistId: z.uuid(),
@@ -24,6 +25,7 @@ export const podcastDraftSchema = z.object({
   artworkAssetId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
   audioAssetId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),
 }).superRefine((value, context) => {
+  if (value.tracklist !== undefined && value.chapters !== undefined) context.addIssue({ code: "custom", path: ["tracklist"], message: "Send either a tracklist or structured chapters, not both." });
   if (value.secondaryArtistId && value.primaryArtistId === value.secondaryArtistId) {
     context.addIssue({ code: "custom", path: ["secondaryArtistId"], message: "Secondary Artist must differ from Primary Artist." });
   }

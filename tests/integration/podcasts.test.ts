@@ -149,3 +149,26 @@ it("derives Podcast duration from READY audio and preserves it on ordinary saves
   const replaced = await updatePodcastDraft(editor, ep.id, { title: edited.title, primaryArtistId: primary.id, labelId, audioAssetId: replacement.id, durationMs: 1, expectedWorkingVersion: 2 });
   expect(replaced.durationMs).toBe(6993518);
 });
+
+describe("validated bulk tracklist atomic save", () => {
+  it("validates raw text on the server, preserves references and freezes the structured result", async () => {
+    const primary=await artist();const source=await prisma.mediaAsset.findUniqueOrThrow({where:{id:audioAssetId}});audioAssetId=(await prisma.mediaAsset.create({data:{...source,audioDelivery:undefined,id:crypto.randomUUID(),sourceStorageKey:"test/bulk-long.mp3",legacyAudioId:crypto.randomUUID(),durationMs:7200000}})).id;
+    const ep=await podcast(primary.id);
+    await replacePodcastChapters(editor,ep.id,{expectedWorkingVersion:1,chapters:[{artist:"D-Nox",title:"Opening",durationMs:0,legacyReference:"KEEP-REF"}]});
+    await publishPodcast(editor,ep.id,{expectedWorkingVersion:2});
+    await updatePodcastDraft(editor,ep.id,{title:"Bulk edited",primaryArtistId:primary.id,labelId,episodeDate:"2026-08-09",expectedWorkingVersion:2,tracklist:"D-Nox - Opening 1;00:00\nA - Long mix 2;01:02:03"});
+    const working=await getPodcast(editor,ep.id);expect(working.chapters.map(c=>[c.artist,c.title,c.durationMs,c.legacyReference])).toEqual([["D-Nox","Opening",0,"KEEP-REF"],["A","Long mix",3723000,"2"]]);
+    expect(working.publishedRevision?.chapters).toHaveLength(1);
+    await publishPodcast(editor,ep.id,{expectedWorkingVersion:3});
+    const legacy=await (await handleLegacyPodcastRequest(request("podcast",ep.legacyId),ep.legacyId)).json();expect(legacy.tracks[0].artist_feature_times[1]).toEqual({artist:"A",title:"Long mix",duration:"01:02:03",id:"2"});
+  });
+  it("rolls back core, working version, chapters and audit when strict validation fails", async () => {
+    const primary=await artist(),ep=await podcast(primary.id);const before=await getPodcast(editor,ep.id);
+    for(const tracklist of ["A - B 1:00:00","A - B 1;00:01","A - B 2;00:00"]){await expect(updatePodcastDraft(editor,ep.id,{title:"Never saved",primaryArtistId:primary.id,labelId,expectedWorkingVersion:1,tracklist})).rejects.toMatchObject({code:"TRACKLIST_INVALID"});expect(await getPodcast(editor,ep.id)).toEqual(before);}
+    await expect(createPodcast(editor,{title:"Invalid",primaryArtistId:primary.id,labelId,tracklist:"A - B 1:00:00"})).rejects.toMatchObject({code:"TRACKLIST_INVALID"});expect(await prisma.podcastEpisode.count()).toBe(1);
+  });
+  it("creates valid text and atomically clears an intentionally empty tracklist", async () => {
+    const primary=await artist();const ep=await createPodcast(editor,{title:"Bulk",primaryArtistId:primary.id,labelId,tracklist:"A - B 1;75:12"});expect((await getPodcast(editor,ep.id)).chapters[0]?.durationMs).toBe(4512000);
+    await updatePodcastDraft(editor,ep.id,{title:"Empty",primaryArtistId:primary.id,labelId,expectedWorkingVersion:1,tracklist:"\n "});expect((await getPodcast(editor,ep.id)).chapters).toEqual([]);
+  });
+});

@@ -1,0 +1,16 @@
+.cms-form-design .podcast-tracklist textarea { display: block; width: 100%; min-height: 300px; resize: vertical; padding: 16px; margin: 8px 0 16px; border: 1px solid var(--control-border); border-radius: var(--control-radius); background: var(--control-surface); font: inherit; font-size: .88rem; line-height: 1.8; color: var(--ink); }
+.cms-form-design .podcast-tracklist textarea:focus { outline: none; border-color: var(--focus-ring); box-shadow: 0 0 0 3px #757c6826; background: #fff; }
+.podcast-tracklist textarea::placeholder { color: #85837b; }
+.tracklist-success, .tracklist-errors { border-radius: 11px; padding: 16px; margin-top: 16px; font-size: .85rem; line-height: 1.6; }
+.tracklist-success { color: #405a32; background: #e8efe1; }
+.tracklist-success p { margin: 4px 0 0; }
+.tracklist-errors { color: #9d3d32; background: #fff1ee; overflow-wrap: anywhere; }
+.tracklist-errors ul { padding-left: 20px; margin-bottom: 0; }
+.tracklist-errors button { font: inherit; color: inherit; padding: 0; background: none; border: 0; text-decoration: underline; cursor: pointer; }
+.tracklist-stale { font-size: .85rem; color: #706e67; margin: 16px 0; }
+.tracklist-preview { margin-top: 20px; border: 1px solid #e3e0d9; border-radius: 12px; overflow: hidden; }
+.tracklist-preview [role=row] { display: grid; grid-template-columns: 32px minmax(0, 1fr) 90px; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #ece9e2; font-size: .85rem; align-items: start; }
+.tracklist-preview [role=row]:last-child { border-bottom: 0; }
+.tracklist-preview [role=cell] { min-width: 0; overflow-wrap: anywhere; }
+.tracklist-preview .tracklist-preview-heading { background: #f7f6f1; font-size: .72rem; color: #76756d; font-weight: 600; }
+@media(max-width:650px) { .tracklist-preview [role=row] { grid-template-columns: 20px minmax(0,1fr) 68px; gap: 8px; padding: 12px 10px; font-size: .78rem; } }

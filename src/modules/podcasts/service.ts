@@ -1,3 +1,4 @@
+import { validateTracklist, type TracklistChapter } from "./tracklist";
 import { ArtistStatus, PodcastStatus, Prisma, type PodcastEpisode, type PodcastEpisodeRevision } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/authorization";
 import { requirePermission } from "@/lib/authorization";
@@ -74,6 +75,12 @@ async function audit(tx: Tx, episode: PodcastEpisode, actorId: string | null, ac
   await tx.podcastAuditLog.create({ data: { episodeId: episode.id, actorId, action, metadata: { legacyId: episode.legacyId, title: episode.title, workingVersion: episode.workingVersion, ...(metadata as object) } } });
 }
 
+function validatedBulkChapters(text: string, durationMs: number | null, previous: TracklistChapter[] = []) {
+  const result = validateTracklist(text, durationMs, previous);
+  if (result.errors.length) throw new AppError(result.errors.map(e => `Line ${e.line}: ${e.message}`).join("\n"), 422, "TRACKLIST_INVALID");
+  return result.chapters;
+}
+
 export async function createPodcast(actor: Actor, input: PodcastDraftInput) {
   requirePermission(actor, "podcast:write"); const data = podcastDraftSchema.parse(input);
   try {
@@ -82,8 +89,9 @@ export async function createPodcast(actor: Actor, input: PodcastDraftInput) {
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const next = draftData(data);
       if (data.audioAssetId) next.durationMs = (await assertReadyAudio(tx, data.audioAssetId, true))!.durationMs;
+      const chapters = data.tracklist !== undefined ? validatedBulkChapters(data.tracklist, next.durationMs ?? null) : data.chapters;
       const episode = await tx.podcastEpisode.create({ data: { id: crypto.randomUUID(), ...next } });
-      if (data.chapters?.length) await tx.podcastChapter.createMany({ data: normalizePodcastChapters(data.chapters).map(chapter => ({ ...chapter, episodeId: episode.id })) });
+      if (chapters?.length) await tx.podcastChapter.createMany({ data: normalizePodcastChapters(chapters).map(chapter => ({ ...chapter, episodeId: episode.id })) });
       await auditMediaAttachment(tx, actor, null, episode.artworkAssetId, { contentType: "PODCAST", contentId: episode.id });
       await auditMediaAttachment(tx, actor, null, episode.audioAssetId, { contentType: "PODCAST_AUDIO", contentId: episode.id }, "AUDIO");
       await audit(tx, episode, actor.userId, "CREATE"); return episode;
@@ -110,9 +118,9 @@ export async function updatePodcastDraft(actor: Actor, id: string, input: unknow
       const updated = await tx.podcastEpisode.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
       await auditMediaAttachment(tx, actor, episode.artworkAssetId, updated.artworkAssetId, { contentType: "PODCAST", contentId: id });
       await auditMediaAttachment(tx, actor, episode.audioAssetId, updated.audioAssetId, { contentType: "PODCAST_AUDIO", contentId: id }, "AUDIO");
-      if (data.chapters !== undefined) {
-        const chapters = normalizePodcastChapters(data.chapters);
+      if (data.chapters !== undefined || data.tracklist !== undefined) {
         const previous = await tx.podcastChapter.findMany({ where: { episodeId: id }, orderBy: { position: "asc" } });
+        const chapters = normalizePodcastChapters(data.tracklist !== undefined ? validatedBulkChapters(data.tracklist, next.durationMs ?? null, previous) : data.chapters);
         await tx.podcastChapter.deleteMany({ where: { episodeId: id } });
         if (chapters.length) await tx.podcastChapter.createMany({ data: chapters.map(chapter => ({ id: crypto.randomUUID(), episodeId: id, ...chapter })) });
         await audit(tx, updated, actor.userId, "CHAPTERS_EDIT", { previousCount: previous.length, chapterCount: chapters.length, atomicSave: true });
