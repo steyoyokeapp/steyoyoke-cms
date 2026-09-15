@@ -5,6 +5,8 @@ const httpsUrl = z.union([z.literal(""), z.url().refine((value) => new URL(value
 const optionalDate = z.union([z.literal(""), z.iso.date(), z.null()]).optional();
 
 export const releaseDraftSchema = z.object({
+  catalogue: z.string().trim().max(100).nullable().optional(),
+  trackIds: z.array(z.uuid()).max(500).optional(),
   title: z.string().trim().min(1, "Title is required.").max(255),
   primaryArtistId: z.uuid(),
   secondaryArtistId: z.union([z.uuid(), z.literal(""), z.null()]).optional(),

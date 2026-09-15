@@ -81,3 +81,39 @@ describe("Release publication service", () => {
     expect((await (await handleLegacyReleaseRequest(request("allreleaseartist"))).json()).allreleaseartist).toEqual([{ artist_name: "API Primary" }]); expect((await (await handleLegacyReleaseRequest(request("alltitlerelease"))).json()).alltitlerelease.map((item: { release_title: string }) => item.release_title)).toEqual(["Beta Release", "Steyoyoke Alpha Release"]); expect((await (await handleLegacyReleaseRequest(request("alltitletrackrelease"))).json()).alltitletrackrelease).toEqual([{ track_title: "Needle Track" }, { track_title: "Other Track" }]);
   });
 });
+
+describe("complete atomic Release workflow", () => {
+  it("creates core, artwork, catalogue and ordered Tracks together and freezes Catalogue", async () => {
+    const primary=await artist();const [a,b]=await Promise.all([track(primary.id,"Atomic A"),track(primary.id,"Atomic B")]);
+    const created=await createRelease(editor,{title:"Complete",catalogue:"SYYK303",primaryArtistId:primary.id,labelId,releaseDate:"2026-07-08",artworkAssetId,trackIds:[b.id,a.id],spotifyUrl:"https://spotify.test/manual"});
+    const working=await getRelease(editor,created.id);expect(working.catalogue).toBe("SYYK303");expect(working.tracks.map(t=>t.trackId)).toEqual([b.id,a.id]);expect(working.workingVersion).toBe(1);
+    await publishRelease(editor,created.id,{expectedWorkingVersion:1});const frozen=(await getRelease(editor,created.id)).publishedRevision!;
+    expect(frozen.catalogue).toBe("SYYK303");expect(frozen.artworkAssetId).toBe(artworkAssetId);expect(frozen.primaryArtistId).toBe(primary.id);
+    await updateReleaseDraft(editor,created.id,{title:"Edited",catalogue:"SyykBLK104",primaryArtistId:primary.id,labelId,releaseDate:"2026-07-08",spotifyUrl:"https://spotify.test/manual",trackIds:[a.id,b.id],expectedWorkingVersion:1});
+    const edited=await getRelease(editor,created.id);expect(edited.catalogue).toBe("SyykBLK104");expect(edited.workingVersion).toBe(2);expect(edited.tracks.map(t=>t.trackId)).toEqual([a.id,b.id]);expect(edited.publishedRevision).toEqual(frozen);
+    await publishRelease(editor,created.id,{expectedWorkingVersion:2});expect((await getRelease(editor,created.id)).publishedRevision?.catalogue).toBe("SyykBLK104");expect(await prisma.releaseRevision.findUnique({where:{id:frozen.id}})).toMatchObject({catalogue:"SYYK303",spotifyUrl:"https://spotify.test/manual"});
+  });
+  it("rolls back core, membership, version and audit on invalid membership", async () => {
+    const primary=await artist(),a=await track(primary.id,"Rollback"),created=await createRelease(editor,{title:"Original",primaryArtistId:primary.id,labelId,trackIds:[a.id]});const before=await getRelease(editor,created.id);
+    for(const trackIds of [[a.id,a.id],[crypto.randomUUID()]]) {await expect(updateReleaseDraft(editor,created.id,{title:"Never saved",catalogue:"BAD",primaryArtistId:primary.id,labelId,trackIds,expectedWorkingVersion:1})).rejects.toThrow();expect(await getRelease(editor,created.id)).toEqual(before);}
+    await expect(createRelease(editor,{title:"Never created",primaryArtistId:primary.id,labelId,trackIds:[crypto.randomUUID()]})).rejects.toThrow();expect(await prisma.release.count()).toBe(1);
+  });
+  it("supports null Catalogue and preserves it for old API clients", async () => {
+    const primary=await artist(),created=await createRelease(editor,{title:"Legacy",primaryArtistId:primary.id,labelId});expect(created.catalogue).toBeNull();
+    await updateReleaseDraft(editor,created.id,{title:"Code",catalogue:"SyYk303",primaryArtistId:primary.id,labelId,expectedWorkingVersion:1});
+    const updated=await updateReleaseDraft(editor,created.id,{title:"Old client",primaryArtistId:primary.id,labelId,expectedWorkingVersion:2});expect(updated.catalogue).toBe("SyYk303");
+  });
+  it("freezes Catalogue in a scheduled snapshot despite later draft edits", async () => {
+    const primary=await artist(),a=await track(primary.id,"Scheduled Catalogue");
+    const created=await createRelease(editor,{title:"Scheduled",catalogue:"SyYkIS123",primaryArtistId:primary.id,labelId,releaseDate:"2026-07-08",artworkAssetId,trackIds:[a.id]});
+    const future=new Date(Date.now()+3600000);
+    await scheduleRelease(editor,created.id,{expectedWorkingVersion:1,scheduledFor:future});
+    await updateReleaseDraft(editor,created.id,{title:"Later",catalogue:"OTHER",primaryArtistId:primary.id,labelId,expectedWorkingVersion:1});
+    await runScheduledReleasePublication(future);
+    const result=await getRelease(editor,created.id);expect(result.catalogue).toBe("OTHER");expect(result.publishedRevision?.catalogue).toBe("SyYkIS123");
+  });
+  it("rejects newly attached archived Tracks and retains the existing archive safeguards", async () => {
+    const primary=await artist(),a=await track(primary.id,"Archived fixture");await prisma.track.update({where:{id:a.id},data:{status:"ARCHIVED",archivedAt:new Date()}});
+    await expect(createRelease(editor,{title:"Blocked",primaryArtistId:primary.id,labelId,trackIds:[a.id]})).rejects.toMatchObject({code:"TRACK_ARCHIVED"});
+  });
+});

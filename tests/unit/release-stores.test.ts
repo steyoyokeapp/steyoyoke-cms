@@ -1,0 +1,9 @@
+import { describe, expect, it } from "vitest";
+import { defaultReleaseStores, updateReleaseStores } from "@/modules/releases/stores";
+describe("Release catalogue store defaults", () => {
+  it.each(["SYYK303","SYYK302","SYYKBLK104","SYYKIS087"])("uses normalized %s without changing the input", catalogue => { const result=defaultReleaseStores(catalogue);expect(result.spotifyUrl).toBe(`https://syykrec.com/${catalogue.toLowerCase()}/spotify`);expect(result.appleMusicUrl).toBe(`https://syykrec.com/${catalogue.toLowerCase()}/applemusic`);expect(Object.values(result)).toHaveLength(5); });
+  it("updates managed defaults while preserving manual overrides", () => {const before={...defaultReleaseStores("SYYK303"),spotifyUrl:"https://spotify.test/manual"};const after=updateReleaseStores(before,"SYYK303","SYYK302",new Set(["spotifyUrl"]));expect(after.spotifyUrl).toBe(before.spotifyUrl);expect(after.beatportUrl).toContain("syyk302/beatport");});
+  it("preserves existing manual links with null/unknown Catalogue", () => {const current={...defaultReleaseStores(""),bandcampUrl:"https://bandcamp.test/existing"};expect(updateReleaseStores(current,"","SYYK303",new Set()).bandcampUrl).toBe(current.bandcampUrl);});
+  it("preserves an explicitly edited default and fills blanks", () => {const current=defaultReleaseStores("SYYK303");current.bandcampUrl="";const next=updateReleaseStores(current,"SYYK303","SYYK302",new Set(["spotifyUrl","bandcampUrl"]));expect(next.spotifyUrl).toBe(current.spotifyUrl);expect(next.bandcampUrl).toContain("syyk302/bandcamp");});
+  it("safely encodes URL path characters and clears only defaults", () => {expect(defaultReleaseStores(" Code / ? ").spotifyUrl).toBe("https://syykrec.com/code%20%2F%20%3F/spotify");expect(updateReleaseStores(defaultReleaseStores("SYYK303"),"SYYK303","",new Set())).toEqual(defaultReleaseStores(""));});
+});

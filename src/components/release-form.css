@@ -1,0 +1,15 @@
+.release-search-row { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 24px; max-width: 1056px; }
+.release-search-field { position: relative; flex: 1; min-width: 0; }
+.release-search-field [role=option] small { display: block; margin-top: 4px; }
+.release-search-field [aria-disabled=true] { opacity: .55; cursor: default; }
+.release-search-field [role=status], .release-search-field [role=alert] { padding: 8px 12px; font-size: .8rem; }
+.release-ordered-tracks { margin: 0; padding: 0; list-style: none; }
+.release-ordered-tracks li { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; align-items: center; gap: 16px; padding: 18px 0; border-bottom: 1px solid #e3e0d9; }
+.release-ordered-tracks li:last-child { border: 0; }
+.release-ordered-tracks strong { font-size: .9rem; font-weight: 600; overflow-wrap: anywhere; }
+.release-ordered-tracks small { display: block; font-size: .8rem; color: #706e67; margin-top: 5px; }
+.release-position { color: #76756d; font-size: .85rem; }
+.release-order-actions { display: flex; gap: 8px; }
+.cms-form-design .release-order-actions .button { min-width: 46px; padding: 0 12px; }
+.release-form-secondary { margin-top: 32px; }
+@media(max-width:650px) { .release-search-row { flex-wrap: wrap; } .release-search-field { flex-basis: 100%; } .release-ordered-tracks li { grid-template-columns: 24px minmax(0,1fr); gap: 10px; } .release-order-actions { grid-column: 2; flex-wrap: wrap; } }

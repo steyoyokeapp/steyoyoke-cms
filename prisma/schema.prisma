@@ -534,6 +534,7 @@ model PodcastAuditLog {
 model Release {
   id                  String            @id @default(uuid()) @db.Uuid
   legacyId            Int               @unique @default(autoincrement())
+  catalogue           String?
   title               String
   primaryArtistId     String            @db.Uuid
   secondaryArtistId   String?           @db.Uuid
@@ -595,6 +596,7 @@ model ReleaseRevision {
   releaseId               String                 @db.Uuid
   revisionNumber          Int
   sourceWorkingVersion    Int
+  catalogue               String?
   title                   String
   primaryArtistId         String                 @db.Uuid
   primaryArtistLegacyId   Int

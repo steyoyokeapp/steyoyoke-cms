@@ -17,10 +17,10 @@ function nullable(value: string | null | undefined) {
 
 function draftData(data: ReturnType<typeof releaseDraftSchema.parse>) {
   return {
-    title: data.title, primaryArtistId: data.primaryArtistId, secondaryArtistId: data.secondaryArtistId || null,
+    catalogue: nullable(data.catalogue), title: data.title, primaryArtistId: data.primaryArtistId, secondaryArtistId: data.secondaryArtistId || null,
     labelId: data.labelId, releaseDate: releaseDate(data.releaseDate),
     artworkAssetId: data.artworkAssetId || null,
-    ...Object.fromEntries(urlFields.map((field) => [field, nullable(data[field])])),
+    ...Object.fromEntries(urlFields.map((field) => [field, nullable(data[field])])) as Record<(typeof urlFields)[number], string | null>,
   };
 }
 
@@ -71,7 +71,7 @@ async function snapshot(tx: Tx, release: Release, createdById: string) {
   const latest = await tx.releaseRevision.aggregate({ where: { releaseId: release.id }, _max: { revisionNumber: true } });
   const revision = await tx.releaseRevision.create({ data: {
     id: crypto.randomUUID(), releaseId: release.id, revisionNumber: (latest._max.revisionNumber ?? 0) + 1, sourceWorkingVersion: release.workingVersion,
-    title: release.title, primaryArtistId: dependencies.primary.id, primaryArtistLegacyId: dependencies.primary.legacyId, primaryArtistName: dependencies.primary.publishedRevision!.name,
+    catalogue: release.catalogue, title: release.title, primaryArtistId: dependencies.primary.id, primaryArtistLegacyId: dependencies.primary.legacyId, primaryArtistName: dependencies.primary.publishedRevision!.name,
     secondaryArtistId: dependencies.secondary?.id ?? null, secondaryArtistLegacyId: dependencies.secondary?.legacyId ?? null, secondaryArtistName: dependencies.secondary?.publishedRevision?.name ?? null,
     labelId: dependencies.label.id, labelName: dependencies.label.name, labelLegacyValue: dependencies.label.legacyValue, releaseDate: release.releaseDate!,
     artworkAssetId: release.artworkAssetId,
@@ -93,6 +93,7 @@ export async function createRelease(actor: Actor, input: ReleaseDraftInput) {
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label?.active) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
       const release = await tx.release.create({ data: { id: crypto.randomUUID(), ...draftData(data) } });
+      if (data.trackIds !== undefined) { await writeTrackMembership(tx, release.id, data.trackIds, []); await audit(tx, release, actor.userId, "TRACKS_EDIT", { trackIds: data.trackIds, atomicSave: true }); }
       await auditMediaAttachment(tx, actor, null, release.artworkAssetId, { contentType: "RELEASE", contentId: release.id });
       await audit(tx, release, actor.userId, "CREATE"); return release;
     });
@@ -109,15 +110,34 @@ export async function updateReleaseDraft(actor: Actor, id: string, input: unknow
       const release = await lockRelease(tx, id); assertEditable(release); assertVersion(release, data.expectedWorkingVersion);
       const label = await tx.label.findUnique({ where: { id: data.labelId } });
       if (!label || (!label.active && label.id !== release.labelId)) throw new AppError("Choose an active Label.", 422, "LABEL_INACTIVE");
-      const next = draftData(data); if (data.artworkAssetId === undefined) next.artworkAssetId = release.artworkAssetId; const changedFields = Object.keys(next).filter((key) => String(release[key as keyof Release] ?? "") !== String(next[key as keyof typeof next] ?? ""));
+      const next = draftData(data); if (data.catalogue === undefined) next.catalogue = release.catalogue; if (data.soundcloudUrl === undefined) next.soundcloudUrl = release.soundcloudUrl; if (data.artworkAssetId === undefined) next.artworkAssetId = release.artworkAssetId; const changedFields = Object.keys(next).filter((key) => String(release[key as keyof Release] ?? "") !== String(next[key as keyof typeof next] ?? ""));
       const updated = await tx.release.update({ where: { id }, data: { ...next, workingVersion: { increment: 1 } } });
       await auditMediaAttachment(tx, actor, release.artworkAssetId, updated.artworkAssetId, { contentType: "RELEASE", contentId: id });
+      if (data.trackIds !== undefined) {
+        const previous = await tx.releaseTrack.findMany({ where: { releaseId: id }, orderBy: { position: "asc" } });
+        await writeTrackMembership(tx, id, data.trackIds, previous);
+        await audit(tx, updated, actor.userId, "TRACKS_EDIT", { previousTrackIds: previous.map(t => t.trackId), trackIds: data.trackIds, atomicSave: true });
+      }
       await audit(tx, updated, actor.userId, "EDIT", { changedFields, fromWorkingVersion: release.workingVersion, toWorkingVersion: updated.workingVersion }); return updated;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") throw new AppError("Choose existing Artists and Label.", 422, "INVALID_RELATIONSHIP");
     throw error;
   }
+}
+
+async function writeTrackMembership(tx: Tx, id: string, trackIds: string[], previous: Array<{ trackId: string }>) {
+  if (new Set(trackIds).size !== trackIds.length) throw new AppError("A Track can appear only once in a Release.", 422, "DUPLICATE_RELEASE_TRACK");
+  // SHARE locks coordinate membership changes with Track archive's UPDATE lock.
+  const found = trackIds.length ? await tx.$queryRaw<Array<{ id: string; status: string }>>`
+    SELECT id, status FROM tracks WHERE id IN (${Prisma.join(trackIds.map(id => Prisma.sql`${id}::uuid`))}) ORDER BY id FOR SHARE
+  ` : [];
+  if (found.some(track => track.status === "ARCHIVED" && !previous.some(member => member.trackId === track.id))) {
+    throw new AppError("Deleted Tracks cannot be added to Releases.", 409, "TRACK_ARCHIVED");
+  }
+  if (found.length !== trackIds.length) throw new AppError("One or more selected Tracks do not exist.", 422, "TRACK_NOT_FOUND");
+  await tx.releaseTrack.deleteMany({ where: { releaseId: id } });
+  if (trackIds.length) await tx.releaseTrack.createMany({ data: trackIds.map((trackId, position) => ({ id: crypto.randomUUID(), releaseId: id, trackId, position })) });
 }
 
 async function replaceTracks(actor: Actor, id: string, input: unknown, action: "TRACKS_EDIT" | "REORDER") {
@@ -127,16 +147,7 @@ async function replaceTracks(actor: Actor, id: string, input: unknown, action: "
     const release = await lockRelease(tx, id); assertEditable(release); assertVersion(release, parsed.expectedWorkingVersion);
     const previous = await tx.releaseTrack.findMany({ where: { releaseId: id }, orderBy: { position: "asc" } });
     if (action === "REORDER" && (previous.length !== parsed.trackIds.length || previous.some(({ trackId }) => !parsed.trackIds.includes(trackId)))) throw new AppError("Reordering must retain the current Track membership.", 422, "REORDER_MEMBERSHIP_CHANGED");
-    // SHARE locks coordinate membership changes with Track archive's UPDATE lock.
-    const found = parsed.trackIds.length ? await tx.$queryRaw<Array<{ id: string; status: string }>>`
-      SELECT id, status FROM tracks WHERE id IN (${Prisma.join(parsed.trackIds.map(id => Prisma.sql`${id}::uuid`))}) ORDER BY id FOR SHARE
-    ` : [];
-    if (found.some(track => track.status === "ARCHIVED" && !previous.some(member => member.trackId === track.id))) {
-      throw new AppError("Deleted Tracks cannot be added to Releases.", 409, "TRACK_ARCHIVED");
-    }
-    if (found.length !== parsed.trackIds.length) throw new AppError("One or more selected Tracks do not exist.", 422, "TRACK_NOT_FOUND");
-    await tx.releaseTrack.deleteMany({ where: { releaseId: id } });
-    if (parsed.trackIds.length) await tx.releaseTrack.createMany({ data: parsed.trackIds.map((trackId, position) => ({ id: crypto.randomUUID(), releaseId: id, trackId, position })) });
+    await writeTrackMembership(tx, id, parsed.trackIds, previous);
     const updated = await tx.release.update({ where: { id }, data: { workingVersion: { increment: 1 } } });
     await audit(tx, updated, actor.userId, action, { previousTrackIds: previous.map(({ trackId }) => trackId), trackIds: parsed.trackIds, fromWorkingVersion: release.workingVersion, toWorkingVersion: updated.workingVersion });
     return tx.releaseTrack.findMany({ where: { releaseId: id }, include: { track: true }, orderBy: { position: "asc" } });

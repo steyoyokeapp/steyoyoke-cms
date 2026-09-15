@@ -79,6 +79,7 @@ export const editorSelect = {
     },
   },
   releases: {
+    catalogue: true,
     ...state,
     ...links,
     ...relations,
