@@ -1,5 +1,6 @@
 "use client";
 import "./cms-form-design.css";
+import { CmsDatePicker } from "./cms-date-picker";
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { TrackOption } from "./track-create-form";
@@ -44,7 +45,7 @@ export function PodcastForm({ podcast, artists, labels, role = "EDITOR", mediaAs
         <label>Label<select name="labelId" value={label} onChange={e => setLabel(e.target.value)} required disabled={disabled}><option value="" disabled>Choose Label</option>{labels.map(l => <option value={l.id} key={l.id}>{l.name}{l.active === false ? " (inactive · attached)" : ""}</option>)}</select></label>
         <TrackArtistCombobox modern label="Primary Artist" value={primary} initial={artists} onChange={v => { setPrimary(v); setDirty(true); }} disabled={disabled} required />
         <TrackArtistCombobox modern label="Secondary Artist" value={secondary} initial={artists} onChange={v => { setSecondary(v); setDirty(true); }} disabled={disabled} />
-        <label>Episode Date <span className="hint">Required before publishing</span><input type="date" aria-label="Episode Date" value={date} onChange={e => setDate(e.target.value)} readOnly={disabled} /></label>
+        <CmsDatePicker label="Episode Date" value={date ?? ""} onChange={value => { setDate(value); setDirty(true); }} disabled={disabled} />
       </div></section>
       <TrackMediaUpload modern kind="artwork" artworkAlt="Podcast artwork" initial={mediaAssets.find(a => a.id === podcast?.artworkAssetId)} disabled={disabled || pending} onBusy={setArtworkBusy} onReady={a => { setArtworkId(a.id); setDirty(true); }} />
       <PodcastChapters text={tracklist} onChange={v => { setTracklist(v); setDirty(true); }} onValidate={() => setValidation({ text: tracklist, duration: audioDuration, result: validateTracklist(tracklist, audioDuration, podcast?.chapters ?? []) })} result={validation?.result ?? null} current={validationCurrent} disabled={disabled || pending} />

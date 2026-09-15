@@ -60,7 +60,7 @@ test('Complete Release creation, editable defaults, artwork replacement, atomic 
   await expect(page.getByLabel('Spotify',{exact:true})).toHaveValue('https://example.com/manual-spotify');
   await expect(page.getByLabel('Beatport',{exact:true})).toHaveValue('https://syykrec.com/syykblk104/beatport');
   await artist(page,'Primary Artist',name); await artist(page,'Secondary Artist',secondaryName);
-  await page.getByLabel('Release Date',{exact:true}).fill('2026-09-15'); await artwork(page);
+  await page.getByLabel('Release Date',{exact:true}).fill('15/09/2026'); await artwork(page);
   for(const title of trackTitles) await add(page,title);
   await page.getByRole('button',{name:'Remove Track 3',exact:true}).click();
   await page.getByRole('button',{name:'Move Track 2 up',exact:true}).click();

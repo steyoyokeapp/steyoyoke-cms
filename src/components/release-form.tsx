@@ -1,5 +1,6 @@
 "use client";
 import "./cms-form-design.css";
+import { CmsDatePicker } from "./cms-date-picker";
 import "./release-form.css";
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -33,7 +34,7 @@ export function ReleaseForm({ release, artists, labels, tracks = [], mediaAssets
         <label>Label<select value={label} onChange={e => setLabel(e.target.value)} required disabled={disabled || pending}><option value="" disabled>Choose Label</option>{labels.map(l => <option key={l.id} value={l.id}>{l.name}{l.active === false ? " (inactive · attached)" : ""}</option>)}</select></label>
         <TrackArtistCombobox modern label="Primary Artist" value={primary} initial={artists} onChange={value => { setPrimary(value); setDirty(true); }} required disabled={disabled || pending} />
         <TrackArtistCombobox modern label="Secondary Artist" value={secondary} initial={artists} onChange={value => { setSecondary(value); setDirty(true); }} disabled={disabled || pending} />
-        <label>Release Date <span className="hint">Required before publishing</span><input type="date" aria-label="Release Date" value={date} onChange={e => setDate(e.target.value)} readOnly={disabled || pending} /></label>
+        <CmsDatePicker label="Release Date" value={date ?? ""} onChange={value => { setDate(value); setDirty(true); }} disabled={disabled || pending} />
       </div></section>
       <TrackMediaUpload modern kind="artwork" artworkAlt="Release artwork" initial={mediaAssets.find(a => a.id === release?.artworkAssetId)} disabled={disabled || pending} onBusy={setUploadBusy} onReady={asset => { setArtworkId(asset.id); setDirty(true); }} />
       <section className="track-design-section"><div className="track-section-heading"><h2>DSP links</h2><p>Catalogue fills default links. You can edit each destination.</p></div><div className="track-fields-grid">{releaseStores.map(([key, name]) => <label key={key}>{name}<input type="url" placeholder="https://syykrec.com/…" value={links[key]} onChange={e => { manual.current.add(key); setLinks(current => ({ ...current, [key]: e.target.value })); }} readOnly={disabled || pending} /></label>)}</div></section>

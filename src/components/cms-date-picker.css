@@ -1,0 +1,23 @@
+.cms-date-field { min-width: 0; }
+.cms-date-control { position: relative; margin-top: 8px; }
+.cms-form-design .cms-date-control input { margin-top: 0; padding-right: 48px; height: 48px; }
+.cms-calendar-toggle { position: absolute; right: 3px; top: 3px; width: 42px; height: 42px; border: 0; border-radius: 8px; background: transparent; color: #62675a; display: grid; place-items: center; cursor: pointer; }
+.cms-calendar-toggle:disabled { opacity: .5; cursor: default; }
+.cms-form-design dialog.cms-calendar { position: fixed; margin: 0; width: min(320px,calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 24px); overflow: auto; padding: 16px; border-radius: 16px; background: #fffefa; border: 1px solid #dedbd2; box-shadow: 0 12px 40px #24272026; }
+.cms-calendar::backdrop { background: transparent !important; }
+.cms-calendar-nav, .cms-calendar-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cms-calendar-nav span { font-size: .9rem; font-weight: 600; }
+.cms-calendar button { border: 0; background: transparent; color: #34372f; border-radius: 8px; min-height: 40px; cursor: pointer; font: inherit; }
+.cms-calendar-nav button { width: 40px; font-size: 1.5rem; }
+.cms-calendar-period { display: grid; grid-template-columns: minmax(0,1fr) 90px; gap: 12px; margin: 12px 0; }
+.cms-form-design .cms-calendar-period label { font-size: .75rem; }
+.cms-form-design .cms-calendar-period input, .cms-form-design .cms-calendar-period select { height: 40px; padding: 0 8px; font-size: .8rem; margin-top: 5px; }
+.cms-calendar-week, .cms-calendar-days { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 2px; text-align: center; }
+.cms-calendar-week { font-size: .7rem; color: #6b6e63; padding: 8px 0; }
+.cms-calendar-days button { font-size: .8rem; padding: 0; }
+.cms-calendar button:hover { background: #eeeee6; }
+.cms-calendar-days button[aria-current=date] { box-shadow: inset 0 0 0 1px #78816c; font-weight: 700; }
+.cms-calendar-days button[aria-pressed=true] { background: #30382a; color: white; }
+.cms-calendar-footer { margin-top: 12px; border-top: 1px solid #e7e4dc; padding-top: 8px; }
+.cms-calendar-footer button { padding: 0 10px; font-size: .8rem; }
+.cms-date-error { margin: 8px 0 0; font-size: .8rem; color: #9d3d32; }
